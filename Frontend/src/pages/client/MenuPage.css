@@ -1,0 +1,211 @@
+/* MenuPage.css */
+.menu-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 12px 48px 12px;
+  background: #fafbfc;
+}
+
+.menu-categories {
+  display: flex;
+  justify-content: center;
+  gap: 36px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.menu-category {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  min-width: 90px;
+  position: relative;
+  transition: transform 0.15s;
+}
+.menu-category:hover {
+  transform: translateY(-4px) scale(1.04);
+}
+.menu-category-img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1.5px solid #eee;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.menu-category-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #222;
+  letter-spacing: 1px;
+  margin-bottom: 2px;
+}
+.menu-category.active .menu-category-name {
+  color: #d32f2f;
+}
+.menu-category-underline {
+  width: 36px;
+  height: 3px;
+  background: #d32f2f;
+  border-radius: 2px;
+  margin-top: 2px;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.menu-divider {
+  border-bottom: 2.5px solid #8d1919;
+  margin: 0 auto 24px auto;
+  width: 90%;
+}
+.menu-category-info {
+  text-align: center;
+  margin-bottom: 32px;
+}
+.menu-category-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: #222;
+  margin-bottom: 8px;
+}
+.menu-category-name-red {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+.menu-category-red-text {
+  color: #d32f2f;
+  font-size: 26px;
+  font-weight: bold;
+  letter-spacing: 2px;
+}
+.menu-category-red-line {
+  display: inline-block;
+  height: 2.5px;
+  width: 60px;
+  background: #d32f2f;
+  border-radius: 2px;
+  margin-left: 10px;
+}
+.menu-category-desc {
+  color: #444;
+  font-size: 17px;
+  max-width: 700px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+.menu-products {
+  margin-top: 18px;
+}
+.menu-products-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 28px 32px;
+}
+.menu-product-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  padding: 18px 18px 16px 18px;
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  transition: box-shadow 0.2s, transform 0.15s;
+  position: relative;
+}
+.menu-product-card:hover {
+  box-shadow: 0 6px 24px rgba(211,47,47,0.13);
+  transform: translateY(-3px) scale(1.02);
+}
+.menu-product-img {
+  width: 90px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 10px;
+  background: #f5f5f5;
+  flex-shrink: 0;
+}
+.menu-product-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.menu-product-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.menu-product-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: #222;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-product-price {
+  font-size: 16px;
+  font-weight: 600;
+  color: #d32f2f;
+  min-width: 90px;
+  text-align: right;
+}
+.menu-product-desc {
+  color: #666;
+  font-size: 15px;
+  min-height: 20px;
+  line-height: 1.5;
+  margin-bottom: 2px;
+}
+.menu-add-cart-btn {
+  margin-top: 6px;
+  padding: 8px 0;
+  width: 100%;
+  background: #d32f2f;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s;
+  box-shadow: 0 2px 8px rgba(211,47,47,0.08);
+  position: relative;
+  overflow: hidden;
+}
+.menu-add-cart-btn:hover {
+  background: #b71c1c;
+}
+
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  transform: scale(0);
+  animation: ripple-effect 0.5s linear;
+  background-color: rgba(255,255,255,0.7);
+  pointer-events: none;
+  z-index: 2;
+}
+
+@keyframes ripple-effect {
+  to {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .menu-products-grid {
+    grid-template-columns: 1fr;
+  }
+  .menu-categories {
+    gap: 18px;
+  }
+} 

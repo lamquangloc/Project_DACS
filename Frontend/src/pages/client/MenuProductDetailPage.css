@@ -1,0 +1,182 @@
+.product-detail-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 0;
+}
+.product-title {
+  font-size: 2.2rem;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 32px;
+}
+.product-info-section {
+  display: flex;
+  gap: 40px;
+  margin-bottom: 32px;
+  align-items: flex-start;
+}
+.product-image {
+  width: 380px;
+  height: 380px;
+  object-fit: cover;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+.product-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.product-price {
+  font-size: 2rem;
+  color: #e53935;
+  font-weight: bold;
+}
+.product-desc {
+  font-size: 1.1rem;
+  color: #444;
+}
+.product-categories {
+  font-size: 1rem;
+  color: #888;
+}
+.add-to-cart-btn {
+  padding: 12px 32px;
+  background: #e53935;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  position: relative;
+  overflow: hidden;
+}
+.add-to-cart-btn:hover {
+  background: #b71c1c;
+}
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  transform: scale(0);
+  animation: ripple-effect 0.5s linear;
+  background-color: rgba(255,255,255,0.7);
+  pointer-events: none;
+  z-index: 2;
+}
+@keyframes ripple-effect {
+  to {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+.product-suggestion-carousel {
+  margin-top: 48px;
+  text-align: center;
+}
+.product-suggestion-carousel h2 {
+  font-size: 1.3rem;
+  font-weight: bold;
+  margin-bottom: 18px;
+  text-align: center;
+}
+.carousel-list {
+  display: flex;
+  gap: 32px;
+  margin-bottom: 12px;
+  justify-content: center;
+  align-items: stretch;
+  transition: transform 0.45s cubic-bezier(0.4,0,0.2,1);
+  will-change: transform;
+}
+.carousel-item {
+  width: 260px;
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+  padding: 18px 18px 16px 18px;
+  text-align: center;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.15s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+}
+.carousel-item:hover {
+  box-shadow: 0 8px 32px rgba(211,47,47,0.16);
+  transform: translateY(-3px) scale(1.03);
+}
+.carousel-item img {
+  width: 200px;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 12px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.carousel-item .carousel-category {
+  font-size: 1rem;
+  color: #888;
+  margin-bottom: 2px;
+  font-weight: 500;
+}
+.carousel-item .carousel-name {
+  font-size: 1.18rem;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 2px;
+}
+.carousel-item .carousel-price {
+  font-size: 1.15rem;
+  color: #e53935;
+  font-weight: bold;
+  margin-top: 6px;
+}
+.carousel-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 24px;
+  margin-top: 12px;
+}
+.carousel-controls button {
+  padding: 0;
+  width: 48px;
+  height: 48px;
+  font-size: 2rem;
+  border: none;
+  border-radius: 50%;
+  background: #f5f5f5;
+  color: #b71c1c;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(211,47,47,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, color 0.2s;
+}
+.carousel-controls button:disabled {
+  background: #eee;
+  color: #bbb;
+  cursor: not-allowed;
+}
+@media (max-width: 900px) {
+  .carousel-list {
+    gap: 16px;
+  }
+  .carousel-item {
+    width: 170px;
+    padding: 10px;
+  }
+  .carousel-item img {
+    width: 120px;
+    height: 90px;
+  }
+} 

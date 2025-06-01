@@ -1,0 +1,349 @@
+.user-profile-root {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.user-profile-root h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.user-profile-form {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 32px;
+  display: flex;
+  gap: 48px;
+}
+
+.user-profile-avatar-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.user-profile-avatar {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid #f0f0f0;
+  transition: all 0.3s ease;
+}
+
+.user-profile-avatar:hover {
+  border-color: #1890ff;
+  transform: scale(1.02);
+}
+
+.user-profile-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.user-profile-fields label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1a1a1a;
+  margin-bottom: 4px;
+}
+
+.user-profile-fields .ant-input {
+  height: 40px;
+  border-radius: 6px;
+  border: 1px solid #d9d9d9;
+  transition: all 0.3s;
+}
+
+.user-profile-fields .ant-input:hover {
+  border-color: #40a9ff;
+}
+
+.user-profile-fields .ant-input:focus {
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+.user-profile-fields .ant-input[disabled] {
+  background-color: #f5f5f5;
+  color: rgba(0, 0, 0, 0.65);
+  cursor: not-allowed;
+}
+
+.user-profile-fields .ant-btn {
+  height: 40px;
+  font-size: 16px;
+  font-weight: 500;
+  border-radius: 6px;
+  transition: all 0.3s;
+}
+
+.user-profile-fields .ant-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.2);
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+  .user-profile-form {
+    flex-direction: column;
+    gap: 24px;
+    padding: 24px;
+  }
+
+  .user-profile-avatar-block {
+    margin-bottom: 16px;
+  }
+
+  .user-profile-avatar {
+    width: 120px;
+    height: 120px;
+  }
+}
+
+@media (max-width: 480px) {
+  .user-profile-root {
+    padding: 16px;
+  }
+
+  .user-profile-form {
+    padding: 16px;
+  }
+
+  .user-profile-root h2 {
+    font-size: 20px;
+    margin-bottom: 16px;
+  }
+}
+
+.user-profile-layout {
+  display: flex;
+  gap: 56px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 0;
+}
+
+.user-profile-sidebar {
+  width: 300px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 0 32px 0;
+  min-height: 420px;
+}
+
+.user-profile-avatar-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 32px;
+}
+
+.user-profile-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid #e0e0e0;
+  margin-bottom: 8px;
+  transition: border-color 0.3s, transform 0.3s;
+}
+.user-profile-avatar:hover {
+  border-color: #1890ff;
+  transform: scale(1.04);
+}
+
+.user-profile-menu {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 4px;
+}
+.user-profile-menu a {
+  display: block;
+  padding: 12px 32px;
+  color: #333;
+  font-weight: 500;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background 0.2s, color 0.2s;
+}
+.user-profile-menu a.active, .user-profile-menu a:hover {
+  background: #e6f0ff;
+  color: #1890ff;
+}
+
+.user-profile-main {
+  flex: 1;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  padding: 48px 64px;
+  min-width: 500px;
+}
+
+.user-profile-main h2 {
+  font-size: 22px;
+  font-weight: 600;
+  margin-bottom: 24px;
+}
+
+.user-profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.user-profile-fields label {
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+@media (max-width: 900px) {
+  .user-profile-layout {
+    flex-direction: column;
+    gap: 24px;
+    padding: 16px 0;
+  }
+  .user-profile-sidebar {
+    width: 100%;
+    flex-direction: row;
+    justify-content: flex-start;
+    min-height: unset;
+    padding: 24px 0;
+  }
+  .user-profile-avatar-block {
+    margin-bottom: 0;
+    margin-right: 24px;
+  }
+  .user-profile-menu {
+    flex-direction: row;
+    gap: 12px;
+  }
+  .user-profile-menu a {
+    padding: 10px 18px;
+  }
+  .user-profile-main {
+    padding: 24px 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  .user-profile-main {
+    padding: 12px 2px;
+  }
+  .user-profile-sidebar {
+    padding: 12px 0;
+  }
+  .user-profile-avatar {
+    width: 64px;
+    height: 64px;
+  }
+}
+
+.myorder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.myorder-card {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  padding: 24px 28px 18px 28px;
+  position: relative;
+}
+
+.myorder-header {
+  margin-bottom: 12px;
+  min-height: 24px;
+}
+
+.myorder-products {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-bottom: 10px;
+}
+
+.myorder-product {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #f0f0f0;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+
+.myorder-product-img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  margin-right: 18px;
+  background: #fafafa;
+}
+
+.myorder-product-info {
+  flex: 1;
+}
+.myorder-product-name {
+  font-weight: 600;
+  font-size: 16px;
+}
+.myorder-product-category {
+  color: #888;
+  font-size: 13px;
+  margin: 2px 0 4px 0;
+}
+.myorder-product-qty {
+  font-size: 14px;
+}
+.myorder-product-total {
+  font-weight: 600;
+  font-size: 16px;
+  color: #222;
+  min-width: 120px;
+  text-align: right;
+}
+
+.myorder-total {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  font-size: 17px;
+  font-weight: 500;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+.myorder-total-amount {
+  color: #e53935;
+  font-size: 20px;
+  font-weight: bold;
+  margin-left: 12px;
+}
+
+.myorder-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  margin-top: 10px;
+}
+
+.myorder-footer button {
+  min-width: 120px;
+} 

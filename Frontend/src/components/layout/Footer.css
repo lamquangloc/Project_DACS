@@ -1,0 +1,143 @@
+.footer-custom {
+  background: #fff;
+  padding: 32px 0 0 0;
+  border-top: 2px solid #e0b97d;
+  font-family: 'Segoe UI', Arial, sans-serif;
+}
+
+.footer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  max-width: 1200px;
+  margin: 0 auto;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+
+.footer-col {
+  flex: 1 1 0;
+  min-width: 220px;
+  text-align: center;
+}
+
+.contact-info {
+  text-align: left;
+  font-size: 18px;
+  color: #222;
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.footer-hotline, .footer-address {
+  font-weight: bold;
+  color: #b71c1c;
+}
+.footer-label {
+  font-weight: bold;
+  color: #b71c1c;
+}
+.footer-value {
+  font-weight: normal;
+  color: #222;
+}
+
+.footer-address-label {
+  color: #b71c1c;
+  font-weight: bold;
+  margin-bottom: 2px;
+}
+
+.center-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+}
+.footer-logo {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  margin-bottom: 8px;
+}
+.footer-title {
+  display: flex;
+  gap: 12px;
+  font-size: 38px;
+  font-family: 'Dancing Script', cursive, Arial, sans-serif;
+  color: #b71c1c;
+  font-weight: bold;
+  margin-bottom: 0px;
+}
+.footer-title-main, .footer-title-sub {
+  font-family: inherit;
+}
+.footer-title-slogan {
+  font-size: 16px;
+  color: #b71c1c;
+  margin-bottom: 10px;
+  font-family: 'Dancing Script', cursive, Arial, sans-serif;
+}
+.footer-socials {
+  margin: 10px 0 0 0;
+  display: flex;
+  gap: 18px;
+  font-size: 26px;
+  justify-content: center;
+}
+.footer-socials a {
+  color: #222;
+  transition: color 0.2s;
+}
+.footer-socials a:hover {
+  color: #b71c1c;
+}
+
+.menu-col {
+  text-align: left;
+  margin-top: 24px;
+}
+.footer-menu-title {
+  font-size: 22px;
+  font-weight: bold;
+  margin-bottom: 10px;
+  text-align: left;
+}
+.footer-menu-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 32px;
+  margin-bottom: 10px;
+}
+.footer-menu-item {
+  font-size: 18px;
+  color: #111;
+  font-weight: 500;
+}
+.footer-open-label {
+  color: #b71c1c;
+  font-weight: bold;
+  margin-bottom: 2px;
+  font-size: 17px;
+}
+.footer-desc {
+  color: #222;
+  font-size: 17px;
+  margin-bottom: 10px;
+}
+
+@media (max-width: 900px) {
+  .footer-row {
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+  .footer-col, .menu-col, .contact-info {
+    text-align: center !important;
+    margin-top: 0;
+  }
+  .footer-menu-list {
+    justify-content: center;
+  }
+} 

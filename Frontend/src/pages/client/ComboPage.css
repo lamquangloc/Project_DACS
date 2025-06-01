@@ -1,0 +1,68 @@
+.combo-page {
+  padding: 0 0 32px 0;
+}
+.combo-title {
+  font-size: 28px;
+  font-weight: 600;
+  text-align: center;
+  margin-top: 32px;
+}
+.combo-main-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 18px 0;
+}
+.combo-main-title {
+  color: #e53935;
+  font-weight: 700;
+  font-size: 32px;
+  letter-spacing: 2px;
+}
+.combo-main-title-row .combo-bar {
+  flex: 1;
+  height: 2px;
+  background: #e53935;
+  max-width: 80px;
+  border-radius: 2px;
+}
+.combo-main-title-row .combo-bar.left {
+  margin-right: 12px;
+}
+.combo-main-title-row .combo-bar.right {
+  margin-left: 12px;
+}
+.combo-desc {
+  max-width: 700px;
+  margin: 0 auto 32px auto;
+  color: #444;
+  font-size: 18px;
+  line-height: 1.6;
+  text-align: center;
+}
+.combo-products {
+  margin-top: 16px;
+}
+
+/* Hiệu ứng ripple cho nút Thêm giỏ hàng ở trang combo */
+.combo-add-cart-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  transform: scale(0);
+  animation: ripple-effect 0.5s linear;
+  background-color: rgba(255,255,255,0.7);
+  pointer-events: none;
+  z-index: 2;
+}
+
+@keyframes ripple-effect {
+  to {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+} 

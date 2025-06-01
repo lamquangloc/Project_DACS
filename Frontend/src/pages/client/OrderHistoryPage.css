@@ -1,0 +1,159 @@
+.order-history-page {
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.order-history-page h1 {
+  margin-bottom: 2rem;
+  color: #333;
+}
+
+.no-orders {
+  text-align: center;
+  padding: 3rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.no-orders p {
+  margin-bottom: 1rem;
+  color: #666;
+}
+
+.no-orders button {
+  padding: 0.8rem 2rem;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background-color 0.3s;
+}
+
+.no-orders button:hover {
+  background-color: #0056b3;
+}
+
+.orders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.order-card {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.order-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.order-info h3 {
+  margin: 0;
+  color: #333;
+}
+
+.order-date {
+  margin: 0.5rem 0 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.order-status {
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  color: white;
+  font-size: 0.9rem;
+  text-transform: capitalize;
+}
+
+.order-items {
+  padding: 1rem;
+}
+
+.order-item {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.order-item:last-child {
+  border-bottom: none;
+}
+
+.order-item img {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.item-details {
+  flex: 1;
+}
+
+.item-details h4 {
+  margin: 0 0 0.5rem;
+  color: #333;
+}
+
+.item-details p {
+  margin: 0.25rem 0;
+  color: #666;
+}
+
+.order-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-top: 1px solid #dee2e6;
+}
+
+.order-total {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.order-total p {
+  margin: 0;
+  color: #666;
+}
+
+.order-total h3 {
+  margin: 0;
+  color: #28a745;
+}
+
+.view-details-button {
+  padding: 0.5rem 1rem;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.view-details-button:hover {
+  background-color: #0056b3;
+}
+
+.loading {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+} 

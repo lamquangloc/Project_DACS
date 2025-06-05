@@ -17,7 +17,7 @@ interface OrderResponseData {
 
 export interface IOrderService {
   getAll(page?: number, limit?: number, timestamp?: number): Promise<ApiResponse<IOrderResponse>>;
-  getById(id: string): Promise<ApiResponse<IOrder>>;
+  getById(id: string, isUser: boolean): Promise<ApiResponse<IOrder>>;
   create(order: Partial<IOrder>): Promise<ApiResponse<IOrder>>;
   update(id: string, order: Partial<IOrder>): Promise<ApiResponse<IOrder>>;
   delete(id: string): Promise<ApiResponse<void>>;
@@ -74,9 +74,13 @@ export class OrderService implements IOrderService {
     }
   }
 
-  async getById(id: string): Promise<ApiResponse<IOrder>> {
+  async getById(id: string, isUser: boolean = true): Promise<ApiResponse<IOrder>> {
     try {
-      const response = await axios.get<ApiResponse<IOrder>>(`${ORDER_API}/${id}`);
+      let url = `${ORDER_API}/${id}`;
+      if (isUser) {
+        url = `${ORDER_API}/me/${id}`;
+      }
+      const response = await axios.get<ApiResponse<IOrder>>(url);
       return response.data;
     } catch (error) {
       console.error(`Error fetching order with id ${id}:`, error);

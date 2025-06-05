@@ -44,7 +44,7 @@ const OrderDetailPage: React.FC = () => {
   const fetchOrder = async () => {
     setLoading(true);
     try {
-      const res = await orderService.getById(id!);
+      const res = await orderService.getById(id!, true);
       setOrder(res.data || res);
     } catch (e) {
       message.error('Không thể tải chi tiết đơn hàng');

@@ -329,7 +329,7 @@ const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
       const orderService = new OrderService();
       const response = await orderService.create(orderData);
       
-      if (response.status === 'success') {
+      if (response.status === 'success' || (response as any).paymentUrl) {
         message.success('Tạo đơn hàng thành công');
         onSuccess();
         onClose();

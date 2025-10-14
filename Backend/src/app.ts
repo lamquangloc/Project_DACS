@@ -16,6 +16,7 @@ import { isAuthenticated, isAdminOrStaff } from './middleware/auth.middleware';
 import fs from 'fs';
 import unitRoutes from './routes/unitRoutes';
 import dashboardRoutes from './routes/dashboard.route';
+import n8nChatRoutes from './routes/n8nChat';
 
 const aiChatRoutes = require('./routes/aiChat');
 const app = express();
@@ -44,6 +45,7 @@ app.use('/uploads', express.static(uploadsDir));
 // Public routes
 app.use('/api/auth', authRoutes);
 app.use('/api/ai', aiChatRoutes);
+app.use('/api/n8n', n8nChatRoutes);
 
 // Protected routes
 app.use('/api/categories', categoryRoutes);

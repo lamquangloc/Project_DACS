@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FaShoppingCart, FaInfoCircle, FaComments, FaTimes, FaTrash } from 'react-icons/fa';
+import { FaShoppingCart, FaInfoCircle, FaComments, FaTimes, FaTrash, FaCog } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
-
 
 import './ChatBox.css';
 import { message } from 'antd';
+import N8nConfig from './N8nConfig';
+import N8nChatWidget from './N8nChatWidget';
 
 interface Product {
   id: string;
@@ -76,8 +77,12 @@ const ChatBox: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [userId, setUserId] = useState(getUserId());
+  const [showConfig, setShowConfig] = useState(false);
+  const [useN8n, setUseN8n] = useState(false);
+  const [n8nWebhookUrl, setN8nWebhookUrl] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const isN8nWidget = n8nWebhookUrl?.includes('/chat');
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -100,6 +105,16 @@ const ChatBox: React.FC = () => {
   useEffect(() => {
     setMessages(getChatHistory());
   }, [userId]);
+
+  useEffect(() => {
+    // Load N8N configuration
+    const savedConfig = localStorage.getItem('n8n-config');
+    if (savedConfig) {
+      const config = JSON.parse(savedConfig);
+      setUseN8n(!!config.webhookUrl);
+      setN8nWebhookUrl(config.webhookUrl || '');
+    }
+  }, []);
 
   useEffect(() => {
     const handleStorage = () => {
@@ -126,7 +141,8 @@ const ChatBox: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:5000/api/ai/chat', {
+      const endpoint = useN8n ? '/api/n8n/chat' : '/api/ai/chat';
+      const response = await fetch(`http://localhost:5000${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input, userId }),
@@ -325,11 +341,25 @@ const ChatBox: React.FC = () => {
           <FaComments />
         </button>
       )}
-      {isOpen && (
+      {isOpen && useN8n && isN8nWidget ? (
+        <N8nChatWidget
+          webhookUrl={n8nWebhookUrl}
+          isVisible={isOpen}
+          onClose={() => setIsOpen(false)}
+        />
+      ) : isOpen && (
         <div className="chat-box">
           <div className="chat-header">
-            <h3>Chatbox</h3>
+            <h3>{useN8n ? 'AI Agent (N8N)' : 'Chatbox'}</h3>
             <div style={{ display: 'flex', gap: 8 }}>
+              <button 
+                className="clear-button" 
+                onClick={() => setShowConfig(!showConfig)} 
+                title="Cấu hình AI"
+                style={{ background: 'rgba(255,255,255,0.2)' }}
+              >
+                <FaCog />
+              </button>
               <button className="clear-button" onClick={handleClearChat} title="Xóa lịch sử chat">
                 <FaTrash />
               </button>
@@ -370,6 +400,17 @@ const ChatBox: React.FC = () => {
             )}
             <div ref={messagesEndRef} />
           </div>
+          {showConfig && (
+            <div style={{ padding: '10px', borderTop: '1px solid #e0e0e0' }}>
+              <N8nConfig 
+                onConfigChange={(config) => {
+                  setUseN8n(!!config.webhookUrl);
+                  setN8nWebhookUrl(config.webhookUrl || '');
+                  setShowConfig(false);
+                }} 
+              />
+            </div>
+          )}
           <div className="input-area">
             <input
               type="text"

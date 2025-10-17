@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import '@n8n/chat/style.css';
 import './N8nChatWidget.css';
 
@@ -13,8 +13,6 @@ const N8nChatWidget: React.FC<N8nChatWidgetProps> = ({
   isVisible = true, 
   onClose 
 }) => {
-  const chatRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     if (!webhookUrl || !isVisible) return;
 
@@ -23,10 +21,7 @@ const N8nChatWidget: React.FC<N8nChatWidgetProps> = ({
       try {
         const { createChat } = await import('@n8n/chat');
         
-        // Clear any existing chat
-        if (chatRef.current) {
-          chatRef.current.innerHTML = '';
-        }
+        // No target: let n8n render its own floating widget
 
         // Collect user metadata from localStorage/session
         let userId: string | undefined;
@@ -42,14 +37,12 @@ const N8nChatWidget: React.FC<N8nChatWidgetProps> = ({
         // Create new chat instance
         createChat({
           webhookUrl: webhookUrl,
-          target: chatRef.current || undefined,
-          // Additional configuration options
+          // target omitted to use default floating UI
           theme: {
-            primaryColor: '#0084ff',
-            textColor: '#333',
-            backgroundColor: '#fff',
+            primaryColor: '#111827',
+            textColor: '#111827',
+            backgroundColor: '#ffffff',
           },
-          // Pass user metadata so n8n can authenticate/segment
           metadata: {
             userId: userId || sessionStorage.getItem('guest_chat_id') || 'guest',
             token,
@@ -66,32 +59,8 @@ const N8nChatWidget: React.FC<N8nChatWidgetProps> = ({
     initChat();
   }, [webhookUrl, isVisible]);
 
-  if (!isVisible) return null;
-
-  return (
-    <div className="n8n-chat-container">
-      <div className="n8n-chat-header">
-        <h3>AI Assistant</h3>
-        {onClose && (
-          <button 
-            className="n8n-chat-close" 
-            onClick={onClose}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: '1.2em',
-              padding: '4px'
-            }}
-          >
-            ×
-          </button>
-        )}
-      </div>
-      <div ref={chatRef} className="n8n-chat-widget" />
-    </div>
-  );
+  // Render nothing; n8n manages its own floating button/panel
+  return null;
 };
 
 export default N8nChatWidget;

@@ -82,7 +82,7 @@ const ChatBox: React.FC = () => {
   const [n8nWebhookUrl, setN8nWebhookUrl] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const isN8nWidget = n8nWebhookUrl?.includes('/chat');
+  const isN8nWidget = true;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -107,12 +107,15 @@ const ChatBox: React.FC = () => {
   }, [userId]);
 
   useEffect(() => {
-    // Load N8N configuration
+    // Load N8N configuration with sensible default
     const savedConfig = localStorage.getItem('n8n-config');
     if (savedConfig) {
       const config = JSON.parse(savedConfig);
-      setUseN8n(!!config.webhookUrl);
-      setN8nWebhookUrl(config.webhookUrl || '');
+      setUseN8n(true);
+      setN8nWebhookUrl(config.webhookUrl || 'https://tunz.app.n8n.cloud/webhook/250be22b-841f-4802-a3f5-9c661ba362d0');
+    } else {
+      setUseN8n(true);
+      setN8nWebhookUrl('https://tunz.app.n8n.cloud/webhook/250be22b-841f-4802-a3f5-9c661ba362d0');
     }
   }, []);
 
@@ -341,89 +344,12 @@ const ChatBox: React.FC = () => {
           <FaComments />
         </button>
       )}
-      {isOpen && useN8n && isN8nWidget ? (
+      {isOpen && (
         <N8nChatWidget
           webhookUrl={n8nWebhookUrl}
           isVisible={isOpen}
           onClose={() => setIsOpen(false)}
         />
-      ) : isOpen && (
-        <div className="chat-box">
-          <div className="chat-header">
-            <h3>{useN8n ? 'AI Agent (N8N)' : 'Chatbox'}</h3>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button 
-                className="clear-button" 
-                onClick={() => setShowConfig(!showConfig)} 
-                title="Cấu hình AI"
-                style={{ background: 'rgba(255,255,255,0.2)' }}
-              >
-                <FaCog />
-              </button>
-              <button className="clear-button" onClick={handleClearChat} title="Xóa lịch sử chat">
-                <FaTrash />
-              </button>
-              <button className="close-button" onClick={() => setIsOpen(false)}>
-                <FaTimes />
-              </button>
-            </div>
-          </div>
-          <div className="messages">
-            {messages.map((message, index) => (
-              <div key={index} className={`message ${message.isUser ? 'user' : 'ai'}`}>
-                <div className="message-content">
-                  {message.context?.type === 'products' ? (
-                    <>
-                      <p>Đây là sản phẩm mà tôi gợi ý dựa theo yêu cầu của bạn.</p>
-                      {renderProducts(message.context)}
-                      {message.context.orderInfo && (
-                        <p>{message.context.orderInfo}</p>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <p>{message.text}</p>
-                      {message.context?.orderInfo && (
-                        <p>{message.context.orderInfo}</p>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-            {isLoading && (
-              <div className="message ai">
-                <div className="message-content">
-                  <p>Đang tìm kiếm...</p>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-          {showConfig && (
-            <div style={{ padding: '10px', borderTop: '1px solid #e0e0e0' }}>
-              <N8nConfig 
-                onConfigChange={(config) => {
-                  setUseN8n(!!config.webhookUrl);
-                  setN8nWebhookUrl(config.webhookUrl || '');
-                  setShowConfig(false);
-                }} 
-              />
-            </div>
-          )}
-          <div className="input-area">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-              placeholder="Nhập tin nhắn..."
-            />
-            <button onClick={handleSend} disabled={isLoading}>
-              Gửi
-            </button>
-          </div>
-        </div>
       )}
     </>
   );

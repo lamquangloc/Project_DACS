@@ -1,18 +1,4 @@
-.n8n-chat-container {
-  position: fixed;
-  top: 80px;
-  bottom: 100px;
-  right: 24px;
-  width: 380px;
-  height: 600px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.18);
-  display: flex;
-  flex-direction: column;
-  z-index: 999;
-  animation: slideIn 0.3s ease;
-}
+/* Using native n8n floating UI; no container needed */
 
 @keyframes slideIn {
   from {
@@ -25,55 +11,33 @@
   }
 }
 
-.n8n-chat-header {
-  padding: 16px;
-  background: #0084ff;
-  color: white;
-  border-radius: 12px 12px 0 0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+/* removed custom header so only native n8n header shows */
 
-.n8n-chat-header h3 {
-  margin: 0;
-  font-size: 1.1em;
-}
+/* No custom wrapper for widget now */
 
-.n8n-chat-close {
-  background: none;
-  border: none;
-  color: white;
-  cursor: pointer;
-  font-size: 1.2em;
-  padding: 4px;
-  border-radius: 4px;
-  transition: background-color 0.2s;
-}
-
-.n8n-chat-close:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.n8n-chat-widget {
-  flex: 1;
-  overflow: hidden;
-  border-radius: 0 0 12px 12px;
-}
-
-/* Override N8N chat styles if needed */
+/* Override N8n chat internal styles to blend with site */
 .n8n-chat-widget .chat-container {
   height: 100%;
-  border-radius: 0 0 12px 12px;
+}
+.n8n-chat-widget .chat-header,
+.n8n-chat-widget .header {
+  background: #111827 !important;
+  color: #fff !important;
+}
+.n8n-chat-widget .message.user {
+  background: #111827 !important;
+  color: #fff !important;
+}
+.n8n-chat-widget .message.bot {
+  background: #f3f4f6 !important;
+  color: #111827 !important;
+}
+.n8n-chat-widget button,
+.n8n-chat-widget .send-button {
+  background: #111827 !important;
+  color: #fff !important;
+  border: none !important;
 }
 
 /* Mobile responsiveness */
-@media (max-width: 768px) {
-  .n8n-chat-container {
-    top: 60px;
-    right: 12px;
-    left: 12px;
-    width: auto;
-    height: calc(100vh - 120px);
-  }
-}
+/* No responsive wrapper needed */

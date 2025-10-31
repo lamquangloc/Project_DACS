@@ -1,11 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FaShoppingCart, FaInfoCircle, FaComments, FaTimes, FaTrash, FaCog } from 'react-icons/fa';
+import { FaShoppingCart, FaInfoCircle, FaComments, FaTimes } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 
 import './ChatBox.css';
 import { message } from 'antd';
-import N8nConfig from './N8nConfig';
-import N8nChatWidget from './N8nChatWidget';
+import { API_URL } from '../config/config';
 
 interface Product {
   id: string;
@@ -42,23 +41,96 @@ const getUserId = () => {
   return guestId;
 };
 
-const getChatHistory = () => {
-  const userId = getUserId();
+const getChatHistory = (userIdOverride?: string) => {
+  const userId = userIdOverride || getUserId();
   const history = localStorage.getItem(`chat_history_${userId}`);
   return history ? JSON.parse(history) : [];
 };
 
-const saveChatHistory = (messages: any[]) => {
-  const userId = getUserId();
+const saveChatHistory = (messages: any[], userIdOverride?: string) => {
+  const userId = userIdOverride || getUserId();
   localStorage.setItem(`chat_history_${userId}`, JSON.stringify(messages));
 };
 
-const clearGuestChat = () => {
-  const userId = getUserId();
+const clearGuestChat = (userIdOverride?: string) => {
+  const userId = userIdOverride || getUserId();
   if (userId.startsWith('guest_')) {
     localStorage.removeItem(`chat_history_${userId}`);
     sessionStorage.removeItem('guest_chat_id');
   }
+};
+
+const generateSessionId = (userId: string) => `session_${userId}_${Date.now()}`;
+
+const getExistingSessionId = (userId: string) => {
+  const stored = sessionStorage.getItem('n8n_session_id');
+  if (stored && stored.startsWith(`session_${userId}`)) {
+    return stored;
+  }
+  const newSessionId = generateSessionId(userId);
+  sessionStorage.setItem('n8n_session_id', newSessionId);
+  return newSessionId;
+};
+
+const extractReplyFromResponse = (data: any): string => {
+  if (!data) return 'Xin lỗi, tôi không thể trả lời ngay bây giờ.';
+
+  if (typeof data === 'string') return data;
+  if (Array.isArray(data)) {
+    const joined = data.map((item) => extractReplyFromResponse(item)).filter(Boolean).join('\n');
+    return joined || 'Xin lỗi, tôi không thể trả lời ngay bây giờ.';
+  }
+
+  return (
+    data.reply ||
+    data.output ||
+    data.response ||
+    data.message ||
+    data.text ||
+    data.answer ||
+    data.content ||
+    (typeof data.data === 'string' ? data.data : undefined) ||
+    'Xin lỗi, tôi không thể trả lời ngay bây giờ.'
+  );
+};
+
+const normalizeChatContext = (context: any): ChatContext | undefined => {
+  if (!context || context.type !== 'products' || !Array.isArray(context.products)) {
+    return undefined;
+  }
+
+  const products: Product[] = context.products
+    .map((product: any) => {
+      if (!product) return undefined;
+      const id = String(product.id || product._id || product.productId || product.sku || '');
+      if (!id) return undefined;
+      return {
+        id,
+        name: product.name || product.title || 'Sản phẩm',
+        price: Number(product.price || product.cost || 0),
+        description: product.description || product.summary || '',
+        image: product.image || product.thumbnail || '',
+        categories: product.categories || product.category || '',
+      } as Product;
+    })
+    .filter(Boolean) as Product[];
+
+  if (!products.length) {
+    return undefined;
+  }
+
+  const displayType = ['single', 'list', 'pagination'].includes(context.displayType)
+    ? context.displayType
+    : 'list';
+
+  return {
+    type: 'products',
+    displayType,
+    page: Number(context.page) || 1,
+    totalProducts: Number(context.totalProducts) || products.length,
+    products,
+    orderInfo: context.orderInfo,
+  };
 };
 
 function removeVietnameseTones(str: string) {
@@ -71,18 +143,26 @@ function removeVietnameseTones(str: string) {
     .toLowerCase();
 }
 
+// Câu hỏi thường gặp
+const FAQ_QUESTIONS = [
+  "Xin chào",
+  "Bạn có những món ăn gì?",
+  "Cách đặt bàn như thế nào?",
+  "Thực đơn combo của bạn?",
+];
+
 const ChatBox: React.FC = () => {
+  const initialUserId = getUserId();
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>(getChatHistory());
+  const [userId, setUserId] = useState(initialUserId);
+  const [sessionId, setSessionId] = useState(() => getExistingSessionId(initialUserId));
+  const [messages, setMessages] = useState<Message[]>(() => getChatHistory(initialUserId));
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [userId, setUserId] = useState(getUserId());
-  const [showConfig, setShowConfig] = useState(false);
-  const [useN8n, setUseN8n] = useState(false);
-  const [n8nWebhookUrl, setN8nWebhookUrl] = useState('');
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const [showFAQ, setShowFAQ] = useState(true); // Hiển thị FAQ khi mở chatbox
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const isN8nWidget = true;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -93,35 +173,30 @@ const ChatBox: React.FC = () => {
   }, [messages]);
 
   useEffect(() => {
-    saveChatHistory(messages);
-  }, [messages]);
+    saveChatHistory(messages, userId);
+  }, [messages, userId]);
 
   useEffect(() => {
-    const handleUnload = () => clearGuestChat();
+    const handleUnload = () => clearGuestChat(userId);
     window.addEventListener('beforeunload', handleUnload);
     return () => window.removeEventListener('beforeunload', handleUnload);
-  }, []);
-
-  useEffect(() => {
-    setMessages(getChatHistory());
   }, [userId]);
 
   useEffect(() => {
-    // Load N8N configuration with sensible default
-    const savedConfig = localStorage.getItem('n8n-config');
-    if (savedConfig) {
-      const config = JSON.parse(savedConfig);
-      setUseN8n(true);
-      setN8nWebhookUrl(config.webhookUrl || 'https://tunz.app.n8n.cloud/webhook/250be22b-841f-4802-a3f5-9c661ba362d0');
-    } else {
-      setUseN8n(true);
-      setN8nWebhookUrl('https://tunz.app.n8n.cloud/webhook/250be22b-841f-4802-a3f5-9c661ba362d0');
-    }
-  }, []);
+    const loadedMessages = getChatHistory(userId);
+    setMessages(loadedMessages);
+    // Hiển thị FAQ khi load lại trang nếu chưa có tin nhắn
+    setShowFAQ(loadedMessages.length === 0);
+    const ensuredSessionId = getExistingSessionId(userId);
+    setSessionId(ensuredSessionId);
+  }, [userId]);
+
 
   useEffect(() => {
     const handleStorage = () => {
-      setUserId(getUserId());
+      const updatedUserId = getUserId();
+      setUserId(updatedUserId);
+      setSessionId(getExistingSessionId(updatedUserId));
     };
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
@@ -129,39 +204,81 @@ const ChatBox: React.FC = () => {
 
   useEffect(() => {
     if (isOpen) {
+      // Khi mở chatbox, hiển thị FAQ nếu chưa có tin nhắn
+      setShowFAQ(messages.length === 0);
       setTimeout(() => {
         scrollToBottom();
       }, 0);
     }
-  }, [isOpen]);
+  }, [isOpen, messages.length]);
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  // Detect scroll position to adjust chat button position
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollTop = window.scrollY;
+      // ScrollToTopButton xuất hiện khi scrollTop > 80
+      setShowScrollToTop(scrollTop > 80);
+    };
+    
+    // Check initial scroll position
+    handleScroll();
+    
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
-    const userMessage = { text: input, isUser: true };
+  const handleSend = async (customMessage?: string) => {
+    const messageToSend = customMessage || input.trim();
+    if (!messageToSend) return;
+
+    // Ẩn FAQ khi người dùng bắt đầu chat
+    setShowFAQ(false);
+
+    const userMessage = { text: messageToSend, isUser: true };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
 
+    const currentSessionId = sessionId || getExistingSessionId(userId);
+
     try {
-      const endpoint = useN8n ? '/api/n8n/chat' : '/api/ai/chat';
-      const response = await fetch(`http://localhost:5000${endpoint}`, {
+      // Gọi qua backend proxy để tránh lỗi CORS
+      const response = await fetch(`${API_URL}/api/n8n/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input, userId }),
+        body: JSON.stringify({
+          input: messageToSend,
+          userId,
+          sessionId: currentSessionId,
+          context: {},
+        }),
       });
 
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.reply || `Lỗi ${response.status}: ${response.statusText}`);
+      }
+
       const data = await response.json();
-      setMessages(prev => [...prev, { 
-        text: data.reply, 
+
+      const reply = data.reply || 'Xin lỗi, tôi không thể trả lời ngay bây giờ.';
+      const normalizedContext = normalizeChatContext(data.context || null);
+
+      const activeSessionId = data.sessionId || currentSessionId;
+      setSessionId(activeSessionId);
+      sessionStorage.setItem('n8n_session_id', activeSessionId);
+
+      setMessages(prev => [...prev, {
+        text: reply,
         isUser: false,
-        context: data.context 
+        context: normalizedContext,
       }]);
     } catch (error) {
-      console.error('Error:', error);
-      setMessages(prev => [...prev, { 
-        text: 'Xin lỗi, đã có lỗi xảy ra.', 
-        isUser: false 
+      console.error('Error sending message to N8N:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Xin lỗi, đã có lỗi xảy ra khi kết nối với trợ lý.';
+      setMessages(prev => [...prev, {
+        text: errorMessage,
+        isUser: false,
       }]);
     } finally {
       setIsLoading(false);
@@ -197,11 +314,6 @@ const ChatBox: React.FC = () => {
     navigate(`/menu/${slug}`);
   };
 
-  const handleClearChat = () => {
-    setMessages([]);
-    const userId = getUserId();
-    localStorage.removeItem(`chat_history_${userId}`);
-  };
 
   const renderProducts = (context: ChatContext) => {
     const { displayType, products } = context;
@@ -337,19 +449,125 @@ const ChatBox: React.FC = () => {
   return (
     <>
       {!isOpen && (
-        <button 
-          className="chat-button"
+        <button
+          className={`chat-button ${showScrollToTop ? 'scrolled' : ''}`}
           onClick={() => setIsOpen(true)}
         >
           <FaComments />
         </button>
       )}
       {isOpen && (
-        <N8nChatWidget
-          webhookUrl={n8nWebhookUrl}
-          isVisible={isOpen}
-          onClose={() => setIsOpen(false)}
-        />
+        <div className="chat-box">
+          <div className="chat-header">
+            <div className="chat-header-content">
+              <div className="chat-header-icon">
+                <FaComments />
+              </div>
+              <h3>Trợ lý Ice Restaurents - Tũn</h3>
+            </div>
+            <button
+              className="chat-close-button"
+              onClick={() => {
+                setIsOpen(false);
+                // Khi đóng chatbox, reset showFAQ để hiển thị lại khi mở
+                if (messages.length === 0) {
+                  setShowFAQ(true);
+                }
+              }}
+              aria-label="Đóng chat"
+            >
+              <FaTimes />
+            </button>
+          </div>
+          <div className="messages">
+            {showFAQ && (
+              <div className="welcome-message">
+                <div className="welcome-icon">
+                  <FaComments />
+                </div>
+                <p>Chào bạn! Tôi có thể giúp gì cho bạn?</p>
+                <div className="faq-questions">
+                  <p className="faq-title">Câu hỏi thường gặp:</p>
+                  <div className="faq-grid">
+                    {FAQ_QUESTIONS.map((question, index) => (
+                      <button
+                        key={index}
+                        className="faq-button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleSend(question);
+                        }}
+                        disabled={isLoading}
+                      >
+                        {question}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+            {messages.map((message, index) => (
+              <div
+                key={`message-${index}`}
+                className={`message ${message.isUser ? 'user' : 'ai'}`}
+              >
+                <div className="message-content">
+                  <p className="message-text">{message.text}</p>
+                  {message.context && (
+                    <div className="message-context">
+                      {renderProducts(message.context)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {isLoading && (
+              <div className="message ai">
+                <div className="message-content typing">
+                  <div className="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                  <span className="typing-text">Đang phản hồi...</span>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+          <div className="input-area">
+            <div className="input-wrapper">
+              <input
+                type="text"
+                placeholder="Nhập tin nhắn..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                disabled={isLoading}
+                className="chat-input"
+              />
+              <button
+                className="send-button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSend();
+                }}
+                disabled={isLoading || !input.trim()}
+                aria-label="Gửi tin nhắn"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M22 2L11 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

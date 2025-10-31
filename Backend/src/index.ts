@@ -19,6 +19,7 @@ import reservationRoutes from './routes/reservation.routes';
 import comboRoutes from './routes/combo.routes';
 import unitRoutes from './routes/unitRoutes';
 import dashboardRoutes from './routes/dashboard.route';
+import n8nChatRoutes from './routes/n8nChat';
 
 // Thêm import router AI chat (dùng require để tránh lỗi type)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -42,8 +43,16 @@ if (!fs.existsSync(categoryUploadsDir)) {
 
 // Middleware
 app.use(cors({
-  origin: [process.env.FRONTEND_URL!, process.env.ADMIN_URL!],
-  credentials: true
+  origin: [
+    process.env.FRONTEND_URL!,
+    process.env.ADMIN_URL!,
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:5000'
+  ].filter(Boolean),
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept']
 }));
 app.use(helmet({
   crossOriginResourcePolicy: {
@@ -69,6 +78,7 @@ app.use('/api/combos', comboRoutes);
 app.use('/api/units', unitRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/ai', aiChatRoutes);
+app.use('/api/n8n', n8nChatRoutes);
 
 // Error handling
 app.use(errorHandler);

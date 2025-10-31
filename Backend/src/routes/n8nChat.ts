@@ -13,29 +13,48 @@ const router = express.Router();
  */
 router.post('/chat', async (req, res) => {
   try {
-    const { input, userId, sessionId, context } = req.body;
+    console.log('📨 Received chat request:', {
+      body: req.body,
+      headers: req.headers,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Chấp nhận cả 'input' và 'message' để linh hoạt hơn
+    const { input, message, userId, sessionId, context, metadata } = req.body;
+    const messageText = input || message;
 
     // Validate required fields
-    if (!input || !userId) {
+    if (!messageText || !userId) {
+      console.log('❌ Missing required fields:', { messageText, userId });
       return res.status(400).json({ 
-        reply: 'Thiếu thông tin cần thiết (input, userId)',
+        reply: 'Thiếu thông tin cần thiết (input/message, userId)',
         error: 'MISSING_REQUIRED_FIELDS'
       });
     }
+    
+    console.log('✅ Validated request:', { messageText, userId, sessionId });
 
     // Validate input length
-    if (input.length > 1000) {
+    if (messageText.length > 1000) {
       return res.status(400).json({
         reply: 'Tin nhắn quá dài. Vui lòng rút gọn xuống dưới 1000 ký tự.',
         error: 'INPUT_TOO_LONG'
       });
     }
 
+    console.log('🔄 Calling n8nService.sendMessage...');
     const response = await n8nService.sendMessage({
-      input: input.trim(),
+      input: messageText.trim(),
       userId,
       sessionId,
-      context,
+      context: context || {},
+    });
+
+    console.log('📤 N8N Service response:', {
+      hasReply: !!response.reply,
+      replyLength: response.reply?.length || 0,
+      hasContext: !!response.context,
+      sessionId: response.sessionId
     });
 
     // Ensure response has required fields
@@ -46,6 +65,7 @@ router.post('/chat', async (req, res) => {
       metadata: response.metadata || null
     };
 
+    console.log('✅ Sending response to client');
     return res.json(formattedResponse);
   } catch (error) {
     console.error('N8N Chat error:', error);
@@ -105,6 +125,44 @@ router.get('/health', async (_req, res) => {
       timestamp: new Date().toISOString(),
       service: 'n8n-chat',
       error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * POST /api/n8n/test
+ * Test n8n with a simple message and return raw response
+ */
+router.post('/test', async (req, res) => {
+  try {
+    console.log('🧪 Test endpoint called');
+    const testMessage = req.body.message || 'Xin chào';
+    const testUserId = req.body.userId || 'test-user-' + Date.now();
+    
+    const response = await n8nService.sendMessage({
+      input: testMessage,
+      userId: testUserId,
+      sessionId: `test-session-${Date.now()}`,
+      context: {},
+    });
+    
+    res.json({
+      success: true,
+      message: 'Test completed',
+      request: {
+        message: testMessage,
+        userId: testUserId
+      },
+      response: response,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('N8N test error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test failed',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString()
     });
   }
 });

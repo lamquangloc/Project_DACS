@@ -20,7 +20,7 @@ router.post('/chat', async (req, res) => {
     });
     
     // Chấp nhận cả 'input' và 'message' để linh hoạt hơn
-    const { input, message, userId, sessionId, context, metadata } = req.body;
+    const { input, message, userId, sessionId, context } = req.body;
     const messageText = input || message;
 
     // Validate required fields
@@ -54,6 +54,8 @@ router.post('/chat', async (req, res) => {
       hasReply: !!response.reply,
       replyLength: response.reply?.length || 0,
       hasContext: !!response.context,
+      hasCart: !!response.cart, // Log để debug
+      cartItemsCount: response.cart?.items?.length || 0,
       sessionId: response.sessionId
     });
 
@@ -61,6 +63,7 @@ router.post('/chat', async (req, res) => {
     const formattedResponse = {
       reply: response.reply || 'Xin lỗi, tôi không thể trả lời ngay bây giờ.',
       context: response.context || null,
+      cart: response.cart || null, // Forward cart data để frontend sync
       sessionId: response.sessionId || sessionId,
       metadata: response.metadata || null
     };

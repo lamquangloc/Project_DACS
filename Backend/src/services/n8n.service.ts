@@ -15,6 +15,7 @@ interface N8nResponse {
   context?: any;
   sessionId?: string;
   metadata?: any;
+  cart?: any; // Cart data for frontend synchronization
 }
 
 class N8nService {
@@ -58,6 +59,9 @@ class N8nService {
       // N8N Chat Trigger Node expects specific format
       const generatedSessionId = request.sessionId || `session_${request.userId}_${Date.now()}`;
       
+      // Extract cart data từ context (nếu có)
+      const cartData = request.context?.cart || null;
+      
       const payload = {
         // Chat Trigger Node sẽ nhận các field này từ Webhook body
         message: request.input,
@@ -66,7 +70,13 @@ class N8nService {
         sessionId: generatedSessionId,
         // Đặt sessionId ở root level để Chat Trigger Node có thể đọc được
         // Chat Trigger Node thường tự động extract sessionId từ body
-        context: request.context || {},
+        context: {
+          ...(request.context || {}),
+          // Forward cart data nếu có
+          ...(cartData ? { cart: cartData, hasCart: true } : {}),
+        },
+        // Gửi cart ở root level để AI dễ truy cập
+        ...(cartData ? { cart: cartData } : {}),
         timestamp: new Date().toISOString(),
         // Thêm metadata cho AI Agent
         metadata: {
@@ -74,6 +84,12 @@ class N8nService {
           userType: 'user', // hoặc 'admin' tùy theo logic
           conversationId: generatedSessionId,
           sessionId: generatedSessionId, // Thêm vào metadata để chắc chắn
+          // Thêm cart info vào metadata để AI biết có cart không
+          ...(cartData ? { 
+            hasCart: true,
+            cartItemsCount: cartData.items?.length || 0,
+            cartTotal: cartData.total || 0
+          } : {}),
         },
         // Đảm bảo sessionId được expose ở nhiều level
         'chat-session-id': generatedSessionId,
@@ -81,7 +97,7 @@ class N8nService {
 
       console.log('🌐 Sending request to N8N webhook:', this.webhookUrl);
       console.log('📤 Request payload:', JSON.stringify(payload, null, 2));
-      
+
       const response = await fetch(this.webhookUrl, {
         method: 'POST',
         headers,
@@ -89,7 +105,7 @@ class N8nService {
       });
 
       console.log('📥 Response status:', response.status, response.statusText);
-      
+
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'Could not read error response');
         console.error('❌ N8N API error response:', errorText);
@@ -209,20 +225,20 @@ class N8nService {
           reply = data;
         } else if (data.output) {
           reply = typeof data.output === 'string' ? data.output : extractText(data.output) || '';
-        } else if (data.response) {
+      } else if (data.response) {
           reply = typeof data.response === 'string' ? data.response : extractText(data.response) || '';
-        } else if (data.message) {
+      } else if (data.message) {
           reply = typeof data.message === 'string' ? data.message : extractText(data.message) || '';
-        } else if (data.reply) {
+      } else if (data.reply) {
           reply = typeof data.reply === 'string' ? data.reply : extractText(data.reply) || '';
-        } else if (data.text) {
+      } else if (data.text) {
           reply = typeof data.text === 'string' ? data.text : extractText(data.text) || '';
-        } else if (data.content) {
+      } else if (data.content) {
           reply = typeof data.content === 'string' ? data.content : extractText(data.content) || '';
-        } else if (data.answer) {
+      } else if (data.answer) {
           reply = typeof data.answer === 'string' ? data.answer : extractText(data.answer) || '';
-        } else if (data.data && typeof data.data === 'string') {
-          reply = data.data;
+      } else if (data.data && typeof data.data === 'string') {
+        reply = data.data;
         }
       }
       
@@ -238,9 +254,111 @@ class N8nService {
       console.log('✅ Final extracted reply:', reply);
       console.log('✅ Reply length:', reply.length);
       
+      // Extract cart data nếu có trong response (để đồng bộ với frontend)
+      // Thử nhiều cách: từ root, context, hoặc parse từ reply text nếu có JSON block
+      let responseCartData = data.cart || data.context?.cart || null;
+      let cleanedReply = reply; // Reply sau khi loại bỏ JSON block
+      
+      // Nếu chưa tìm thấy, thử parse từ reply text (n8n có thể trả về JSON trong reply)
+      if (!responseCartData && reply) {
+        try {
+          // Tìm JSON block trong reply text (ví dụ: ```json {...} ```)
+          const jsonBlockMatch = reply.match(/```json\s*([\s\S]*?)\s*```/);
+          if (jsonBlockMatch && jsonBlockMatch[1]) {
+            const parsedJson = JSON.parse(jsonBlockMatch[1].trim());
+            if (parsedJson.cart) {
+              responseCartData = parsedJson.cart;
+              // Loại bỏ JSON block khỏi reply để user không thấy JSON
+              cleanedReply = reply.replace(/```json\s*[\s\S]*?\s*```/g, '').trim();
+              console.log('✅ Found cart data in JSON block from reply text');
+            }
+          }
+          
+          // Thử parse toàn bộ reply nếu nó là JSON (nhưng giữ lại text phía trước)
+          if (!responseCartData) {
+            // Tìm pattern: text... ```json {...} ```
+            const textThenJsonMatch = reply.match(/(.*?)```json\s*([\s\S]*?)\s*```/);
+            if (textThenJsonMatch) {
+              const textPart = textThenJsonMatch[1].trim();
+              const jsonPart = textThenJsonMatch[2].trim();
+              try {
+                const parsedJson = JSON.parse(jsonPart);
+                if (parsedJson.cart) {
+                  responseCartData = parsedJson.cart;
+                  cleanedReply = textPart; // Chỉ giữ lại phần text
+                  console.log('✅ Found cart data by parsing JSON block after text');
+                }
+              } catch (e) {
+                // Không parse được
+              }
+            }
+          }
+          
+          // THÊM: Tìm JSON ở cuối reply text (không có code block, chỉ là JSON thuần)
+          // Pattern phổ biến: text...\n{"cart": {...}}
+          if (!responseCartData) {
+            // Tách reply thành các dòng và tìm dòng JSON ở cuối
+            const lines = reply.split('\n');
+            let jsonLineIndex = -1;
+            let jsonLine = '';
+            
+            // Tìm dòng bắt đầu bằng { và kết thúc bằng } (có thể là JSON)
+            for (let i = lines.length - 1; i >= 0; i--) {
+              const line = lines[i].trim();
+              if (line.startsWith('{') && line.endsWith('}')) {
+                jsonLine = line;
+                jsonLineIndex = i;
+                break;
+              }
+            }
+            
+            // Nếu tìm thấy, thử parse
+            if (jsonLineIndex >= 0 && jsonLine) {
+              try {
+                const parsedJson = JSON.parse(jsonLine);
+                if (parsedJson.cart) {
+                  responseCartData = parsedJson.cart;
+                  // Loại bỏ dòng JSON khỏi reply
+                  cleanedReply = lines.slice(0, jsonLineIndex).join('\n').trim();
+                  console.log('✅ Found cart data by parsing JSON line at end of reply');
+                }
+              } catch (e) {
+                // Không parse được JSON từ dòng đơn, thử tìm JSON object multi-line
+                // Tìm từ vị trí cuối cùng có "{" đến hết reply
+                const lastOpenBrace = reply.lastIndexOf('{');
+                if (lastOpenBrace >= 0) {
+                  const jsonCandidate = reply.substring(lastOpenBrace).trim();
+                  try {
+                    const parsedJson = JSON.parse(jsonCandidate);
+                    if (parsedJson.cart) {
+                      responseCartData = parsedJson.cart;
+                      cleanedReply = reply.substring(0, lastOpenBrace).trim();
+                      console.log('✅ Found cart data by parsing JSON from last { brace');
+                    }
+                  } catch (e2) {
+                    // Không parse được
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // Không phải JSON, bỏ qua
+          console.log('⚠️ Error parsing cart from reply:', e);
+        }
+      }
+      
+      if (responseCartData) {
+        console.log('✅ Cart data extracted:', {
+          itemsCount: responseCartData.items?.length || 0,
+          total: responseCartData.total
+        });
+      }
+      
       return {
-        reply: reply,
+        reply: cleanedReply || reply, // Sử dụng cleaned reply (đã loại bỏ JSON block)
         context: data.context || data.metadata || null,
+        cart: responseCartData, // Forward cart data về frontend để sync
         sessionId: data.sessionId || payload.sessionId,
         metadata: data.metadata || payload.metadata,
       };

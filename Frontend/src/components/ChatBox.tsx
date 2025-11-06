@@ -1,10 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FaShoppingCart, FaInfoCircle, FaComments, FaTimes } from 'react-icons/fa';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 
 import './ChatBox.css';
 import { message } from 'antd';
 import { API_URL } from '../config/config';
+import { getImageUrl } from '../utils/image';
 
 interface Product {
   id: string;
@@ -163,6 +166,18 @@ const ChatBox: React.FC = () => {
   const [showFAQ, setShowFAQ] = useState(true); // Hiển thị FAQ khi mở chatbox
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  
+  // ✅ Cache products data để tạo product cards
+  const [productsCache, setProductsCache] = useState<Map<string, { 
+    id: string; 
+    name: string; 
+    image?: string; 
+    price?: number;
+    slug?: string;
+  }>>(new Map());
+  
+  // ✅ State để trigger re-render khi image được fetch
+  const [imageUpdateTrigger, setImageUpdateTrigger] = useState(0);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -212,6 +227,19 @@ const ChatBox: React.FC = () => {
     }
   }, [isOpen, messages.length]);
 
+  // ✅ Helper: Normalize text để so sánh (remove dấu, lowercase, remove special chars)
+  const normalizeText = (text: string): string => {
+    return text
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Remove dấu
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .replace(/[^a-z0-9\s]/g, '') // Remove special chars
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
   // Detect scroll position to adjust chat button position
   useEffect(() => {
     const handleScroll = () => {
@@ -227,6 +255,502 @@ const ChatBox: React.FC = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // ✅ Fetch TẤT CẢ products để cache data cho product cards (với pagination)
+  useEffect(() => {
+    const fetchAllProducts = async () => {
+      try {
+        let allProducts: any[] = [];
+        let page = 1;
+        let hasMore = true;
+        const limit = 100; // Lấy nhiều products mỗi lần
+        
+        // ✅ Fetch tất cả products với pagination
+        while (hasMore) {
+          try {
+            const response = await fetch(`${API_URL}/api/products?page=${page}&limit=${limit}`);
+            const data = await response.json();
+            
+            const products = data.data?.items || 
+                            data.data?.products || 
+                            data.products || 
+                            data.data || [];
+            
+            if (products.length === 0) {
+              hasMore = false;
+              break;
+            }
+            
+            allProducts = [...allProducts, ...products];
+            
+            // Kiểm tra xem còn trang tiếp theo không
+            const totalPages = data.data?.totalPages || data.totalPages || 1;
+            const currentPage = data.data?.currentPage || data.current || page;
+            
+            if (currentPage >= totalPages || products.length < limit) {
+              hasMore = false;
+            } else {
+              page++;
+            }
+          } catch (pageError) {
+            console.error(`Error fetching page ${page}:`, pageError);
+            hasMore = false;
+          }
+        }
+        
+        console.log(`📦 Fetched ALL products: ${allProducts.length} total`);
+        if (allProducts.length > 0) {
+          console.log('📦 Sample product:', allProducts[0]);
+        }
+        
+        const cache = new Map<string, { id: string; name: string; image?: string; price?: number; slug?: string }>();
+        let productsWithImage = 0;
+        let productsWithoutImage = 0;
+        
+        allProducts.forEach((product: any) => {
+          if (product.name && (product.id || product._id)) {
+            const normalizedName = normalizeText(product.name);
+            const originalName = product.name.toLowerCase().trim();
+            
+            // ✅ Lấy image từ nhiều nguồn có thể
+            let imagePath = product.image || 
+                          product.imagePath || 
+                          product.thumbnail || 
+                          product.images?.[0] ||
+                          null;
+            
+            if (imagePath) {
+              productsWithImage++;
+            } else {
+              productsWithoutImage++;
+            }
+            
+            const productData = {
+              id: product.id || product._id,
+              name: product.name,
+              image: imagePath,
+              price: product.price ? Number(product.price) : undefined,
+              slug: `${removeVietnameseTones(product.name)}-${product.id || product._id}`
+            };
+            
+            // ✅ Store với nhiều keys để dễ tìm
+            cache.set(normalizedName, productData);
+            cache.set(originalName, productData);
+            
+            // ✅ Store với tên không có dấu (để match tốt hơn)
+            const nameWithoutTones = removeVietnameseTones(product.name).toLowerCase();
+            if (nameWithoutTones !== normalizedName) {
+              cache.set(nameWithoutTones, productData);
+            }
+            
+            // ✅ Store với từng từ trong tên (để fuzzy match)
+            const words = product.name.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+            words.forEach((word: string) => {
+              if (word.length > 3) {
+                // Store với key là từ quan trọng (ví dụ: "cá kho" từ "Cá Kho Làng Vũ Đại")
+                const importantWords = words.filter((w: string) => w.length > 3);
+                if (importantWords.length > 0) {
+                  const key = importantWords.join(' ');
+                  if (key !== normalizedName && key !== originalName) {
+                    cache.set(key, productData);
+                  }
+                }
+              }
+            });
+          }
+        });
+        
+        setProductsCache(cache);
+        console.log(`✅ Products cached: ${cache.size} entries from ${allProducts.length} products`);
+        console.log(`🖼️ Products with image: ${productsWithImage}, without: ${productsWithoutImage}`);
+        
+        // Log một vài products để kiểm tra
+        const sampleProducts = Array.from(new Set(cache.values())).slice(0, 5);
+        sampleProducts.forEach(p => {
+          console.log(`📋 Product: ${p.name}, Image: ${p.image ? 'YES' : 'NO'}`);
+        });
+      } catch (error) {
+        console.error('Failed to fetch products:', error);
+      }
+    };
+    
+    fetchAllProducts();
+  }, []);
+
+  // ✅ Helper: Extract product name và price từ text
+  // Ví dụ: "Canh Cua Cà Pháo - 110.000đ" → { name: "Canh Cua Cà Pháo", price: "110.000đ" }
+  const extractProductInfo = (text: string): { name: string; price?: string } | null => {
+    if (!text || typeof text !== 'string') return null;
+    
+    // Remove markdown formatting và clean
+    const cleanText = text.replace(/\*\*/g, '').replace(/`/g, '').trim();
+    
+    // Pattern 1: "Tên món - giá" với ₫ hoặc đ ở cuối
+    // Ví dụ: "Canh Cua Cà Pháo - 110.000₫" hoặc "Canh Cua Cà Pháo - 110.000đ"
+    const match1 = cleanText.match(/^(.+?)\s*-\s*([\d.,\s]+[₫đ])$/i);
+    if (match1) {
+      const name = match1[1].trim();
+      const price = match1[2].trim();
+      // Kiểm tra xem có phải số hợp lệ không
+      if (name.length > 2 && /[\d.,\s]+/.test(price)) {
+        return { name, price };
+      }
+    }
+    
+    // Pattern 2: "Tên món - số" (không có ₫, thêm ₫ vào)
+    // Ví dụ: "Canh Cua Cà Pháo - 110.000" hoặc "Salad Cải Mầm Trứng - 89.000"
+    const match2 = cleanText.match(/^(.+?)\s*-\s*([\d.,\s]+)$/);
+    if (match2) {
+      const name = match2[1].trim();
+      const priceStr = match2[2].trim();
+      // Kiểm tra xem có phải số không (ít nhất 3 chữ số)
+      const priceNum = priceStr.replace(/[^\d]/g, '');
+      if (name.length > 2 && priceNum.length >= 3) {
+        return {
+          name,
+          price: `${priceStr}₫`
+        };
+      }
+    }
+    
+    // Pattern 3: "**Tên món** - giá" (markdown bold)
+    const match3 = cleanText.match(/^\*\*(.+?)\*\*\s*-\s*([\d.,\s]+[₫đ]?)$/i);
+    if (match3) {
+      const name = match3[1].trim();
+      const priceStr = match3[2].trim();
+      if (name.length > 2) {
+        return {
+          name,
+          price: priceStr.includes('₫') || priceStr.includes('đ') ? priceStr : `${priceStr}₫`
+        };
+      }
+    }
+    
+    return null;
+  };
+
+  // ✅ Helper: Tìm product trong cache với fuzzy matching nâng cao
+  const findProductInCache = (productName: string): { id: string; name: string; image?: string; price?: number; slug?: string } | null => {
+    if (!productName || productName.trim().length < 2) return null;
+    
+    const normalizedSearch = normalizeText(productName);
+    const lowerSearch = productName.toLowerCase().trim();
+    
+    // 1. Exact match (normalized)
+    if (productsCache.has(normalizedSearch)) {
+      return productsCache.get(normalizedSearch)!;
+    }
+    
+    // 2. Exact match với original name (case insensitive)
+    if (productsCache.has(lowerSearch)) {
+      return productsCache.get(lowerSearch)!;
+    }
+    
+    // 3. Match với tên không có dấu
+    const searchWithoutTones = removeVietnameseTones(productName).toLowerCase();
+    if (productsCache.has(searchWithoutTones)) {
+      return productsCache.get(searchWithoutTones)!;
+    }
+    
+    // 4. Exact match với product.name
+    for (const product of productsCache.values()) {
+      if (product.name.toLowerCase().trim() === lowerSearch) {
+        return product;
+      }
+    }
+    
+    // 5. Partial match - tìm product có tên chứa productName hoặc ngược lại
+    for (const [key, product] of productsCache.entries()) {
+      const normalizedKey = normalizeText(product.name);
+      const productNameLower = product.name.toLowerCase();
+      
+      // Key chứa search hoặc search chứa key
+      if (normalizedKey.includes(normalizedSearch) || normalizedSearch.includes(normalizedKey)) {
+        return product;
+      }
+      
+      // Original name match (case insensitive)
+      if (productNameLower.includes(lowerSearch) || lowerSearch.includes(productNameLower)) {
+        return product;
+      }
+      
+      // Match với tên không có dấu
+      const productWithoutTones = removeVietnameseTones(product.name).toLowerCase();
+      const searchWithoutTonesLower = searchWithoutTones.toLowerCase();
+      if (productWithoutTones.includes(searchWithoutTonesLower) || searchWithoutTonesLower.includes(productWithoutTones)) {
+        return product;
+      }
+    }
+    
+    // 6. Fuzzy match - tìm product có tên tương tự (ít nhất 50% giống nhau)
+    let bestMatch: { product: any; score: number } | null = null;
+    const searchWords = normalizedSearch.split(' ').filter(w => w.length > 2);
+    
+    for (const product of new Set(productsCache.values())) {
+      const normalizedKey = normalizeText(product.name);
+      const keyWords = normalizedKey.split(' ').filter(w => w.length > 2);
+      
+      // Tính độ tương đồng dựa trên số từ chung
+      const commonWords = searchWords.filter(word => keyWords.includes(word));
+      const totalWords = Math.max(searchWords.length, keyWords.length);
+      const score = totalWords > 0 ? commonWords.length / totalWords : 0;
+      
+      // Nếu có ít nhất 1 từ chung và score >= 0.5
+      if (commonWords.length > 0 && score >= 0.5 && (!bestMatch || score > bestMatch.score)) {
+        bestMatch = { product, score };
+      }
+    }
+    
+    if (bestMatch && bestMatch.score >= 0.5) {
+      return bestMatch.product;
+    }
+    
+    return null;
+  };
+
+  // ✅ Helper: Extract text từ React children
+  const extractTextFromChildren = (children: any): string => {
+    if (typeof children === 'string') return children;
+    if (typeof children === 'number') return String(children);
+    if (Array.isArray(children)) {
+      return children.map(child => extractTextFromChildren(child)).join('');
+    }
+    if (children && typeof children === 'object' && 'props' in children) {
+      return extractTextFromChildren(children.props?.children);
+    }
+    return '';
+  };
+
+  // ✅ Custom markdown components để render product cards
+  const markdownComponents: Components = {
+    li: ({ children, ...props }) => {
+      // Extract text từ children (có thể là React elements phức tạp)
+      const childText = extractTextFromChildren(children);
+      
+      // ✅ Kiểm tra xem có phải product không (có pattern "Tên - giá" hoặc chỉ là tên món)
+      const productInfo = extractProductInfo(childText);
+      
+      // ✅ Nếu không match pattern "Tên - giá", thử kiểm tra xem có phải là tên món đơn thuần không
+      // (ví dụ: "Rau Tập Tàng Luộc Chấm Tương" không có giá)
+      let shouldRenderAsProduct = false;
+      let productName = '';
+      let displayPrice = '';
+      
+      if (productInfo) {
+        // Có pattern "Tên - giá"
+        productName = productInfo.name;
+        displayPrice = productInfo.price || '';
+        shouldRenderAsProduct = true;
+      } else {
+        // Thử kiểm tra xem có phải là tên món không (không có giá)
+        const cleanText = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
+        
+        // ✅ Kiểm tra nếu text có vẻ như tên món (không phải số, không phải câu hỏi, có độ dài hợp lý)
+        // Loại bỏ các text không phải tên món
+        const lowerText = cleanText.toLowerCase();
+        const isQuestion = lowerText.includes('bạn muốn') || 
+                          lowerText.includes('có thể') ||
+                          (lowerText.includes('không') && lowerText.includes('?')) ||
+                          lowerText.includes('?') ||
+                          lowerText.match(/^[a-z]+\?/) || // Câu hỏi ngắn
+                          lowerText.startsWith('bạn') && lowerText.length < 20; // Câu hỏi bắt đầu bằng "bạn"
+        
+        const isNumberOnly = /^\d+([.,]\d+)?[₫đ]?$/.test(cleanText.trim());
+        const isTooShort = cleanText.length <= 2;
+        
+        // ✅ Render TẤT CẢ các text có vẻ như tên món (không phải câu hỏi)
+        if (!isQuestion && !isNumberOnly && !isTooShort && cleanText.length > 2) {
+          // Tìm trong cache
+          const maybeProduct = findProductInCache(cleanText);
+          if (maybeProduct) {
+            productName = maybeProduct.name;
+            displayPrice = maybeProduct.price ? `${maybeProduct.price.toLocaleString('vi-VN')}₫` : '';
+            shouldRenderAsProduct = true;
+          } else {
+            // ✅ Nếu không tìm thấy trong cache, VẪN render thành product card
+            // (để đảm bảo TẤT CẢ món đều hiển thị)
+            // Chỉ render nếu text có vẻ như tên món (có ít nhất 2 từ hoặc 1 từ dài)
+            const words = cleanText.split(/\s+/).filter(w => w.length > 1);
+            const wordCount = words.length;
+            const hasLongWord = words.some(w => w.length > 5);
+            
+            // Render nếu: có ít nhất 2 từ HOẶC có 1 từ dài (ví dụ: "CanhCuaCàPháo")
+            if (wordCount >= 2 || (wordCount === 1 && hasLongWord) || cleanText.length > 8) {
+              productName = cleanText;
+              shouldRenderAsProduct = true;
+            }
+          }
+        }
+      }
+      
+      if (shouldRenderAsProduct) {
+        // Re-fetch từ cache để lấy image mới nhất (sau khi async fetch)
+        const product = findProductInCache(productName);
+        
+        // Nếu không có price từ extract, lấy từ product cache
+        if (!displayPrice && product?.price) {
+          displayPrice = `${product.price.toLocaleString('vi-VN')}₫`;
+        }
+        
+        const finalProductName = product?.name || productName;
+        const productSlug = product?.slug || `${removeVietnameseTones(productName)}-${product?.id || 'unknown'}`;
+        
+        // ✅ Lấy image URL với fallback fetch
+        let imageUrl: string | null = null;
+        if (product?.image) {
+          imageUrl = getImageUrl(product.image);
+        } else if (product?.id) {
+          // Nếu không có image trong cache, fetch product detail async
+          fetch(`${API_URL}/api/products/${product.id}`)
+            .then(res => res.json())
+            .then(data => {
+              const productDetail = data.data || data;
+              if (productDetail?.image) {
+                const updatedProduct = {
+                  ...product,
+                  image: productDetail.image
+                };
+                const normalizedName = normalizeText(product.name);
+                const originalName = product.name.toLowerCase().trim();
+                setProductsCache(prev => {
+                  const newCache = new Map(prev);
+                  newCache.set(normalizedName, updatedProduct);
+                  newCache.set(originalName, updatedProduct);
+                  return newCache;
+                });
+                setImageUpdateTrigger(prev => prev + 1);
+              }
+            })
+            .catch(() => {
+              // Silent fail
+            });
+        } else if (!product && productName.length > 3) {
+          // ✅ Nếu không tìm thấy product trong cache, thử search để tìm
+          // (có thể tên hơi khác một chút)
+          const searchName = productName.toLowerCase().trim();
+          // Tìm trong cache với partial match
+          for (const [key, cachedProduct] of productsCache.entries()) {
+            if (normalizeText(key).includes(normalizeText(searchName)) || 
+                normalizeText(searchName).includes(normalizeText(key))) {
+              // Tìm thấy, update và re-render
+              const updatedProduct = { ...cachedProduct };
+              const normalizedName = normalizeText(searchName);
+              const originalName = searchName;
+              setProductsCache(prev => {
+                const newCache = new Map(prev);
+                newCache.set(normalizedName, updatedProduct);
+                newCache.set(originalName, updatedProduct);
+                return newCache;
+              });
+              // Re-fetch để lấy image
+              if (updatedProduct.id) {
+                fetch(`${API_URL}/api/products/${updatedProduct.id}`)
+                  .then(res => res.json())
+                  .then(data => {
+                    const productDetail = data.data || data;
+                    if (productDetail?.image) {
+                      const finalProduct = { ...updatedProduct, image: productDetail.image };
+                      setProductsCache(prev => {
+                        const newCache = new Map(prev);
+                        newCache.set(normalizedName, finalProduct);
+                        newCache.set(originalName, finalProduct);
+                        return newCache;
+                      });
+                      setImageUpdateTrigger(prev => prev + 1);
+                    }
+                  })
+                  .catch(() => {});
+              }
+              break;
+            }
+          }
+        }
+        
+        // ✅ Sử dụng imageUpdateTrigger để đảm bảo re-render khi image được fetch
+        const _ = imageUpdateTrigger; // eslint-disable-line
+        
+        return (
+          <li className="product-list-item" {...props}>
+            <div className="product-card-inline">
+              {/* ✅ Luôn hiển thị image wrapper (có placeholder nếu không có image) */}
+              <div className="product-card-image-wrapper">
+                {imageUrl ? (
+                  <img 
+                    src={imageUrl} 
+                    alt={finalProductName}
+                    className="product-card-image"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                    loading="lazy"
+                  />
+                ) : (
+                  // Placeholder icon khi không có image
+                  <div className="product-card-placeholder">
+                    <span style={{ fontSize: '32px', opacity: 0.3 }}>🍽️</span>
+                  </div>
+                )}
+              </div>
+              <div className="product-card-content">
+                {product ? (
+                  <Link 
+                    to={`/menu/${productSlug}`}
+                    className="product-card-name"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {finalProductName}
+                  </Link>
+                ) : (
+                  <span className="product-card-name" style={{ cursor: 'default' }}>
+                    {finalProductName}
+                  </span>
+                )}
+                {displayPrice && (
+                  <span className="product-card-price">{displayPrice}</span>
+                )}
+              </div>
+            </div>
+          </li>
+        );
+      }
+      
+      // Không phải product, render bình thường
+      return <li {...props}>{children}</li>;
+    },
+  };
+
+  // Helper: Lấy cart data từ localStorage
+  const getCartFromStorage = () => {
+    try {
+      const cartItems = JSON.parse(localStorage.getItem('cartItems') || '[]');
+      if (!Array.isArray(cartItems) || cartItems.length === 0) {
+        return null;
+      }
+      
+      // Transform từ localStorage format → format phù hợp với AI
+      const transformedCart = {
+        items: cartItems.map((item: any) => {
+          const product = item.product || {};
+          return {
+            productId: product._id || product.id,
+            name: product.name || 'Sản phẩm',
+            price: product.price || 0,
+            quantity: item.quantity || 1,
+            image: product.image || ''
+          };
+        }),
+        total: cartItems.reduce((sum: number, item: any) => {
+          const product = item.product || {};
+          return sum + (product.price || 0) * (item.quantity || 1);
+        }, 0)
+      };
+      
+      return transformedCart;
+    } catch (error) {
+      console.error('Error reading cart from localStorage:', error);
+      return null;
+    }
+  };
+
   const handleSend = async (customMessage?: string) => {
     const messageToSend = customMessage || input.trim();
     if (!messageToSend) return;
@@ -241,6 +765,12 @@ const ChatBox: React.FC = () => {
 
     const currentSessionId = sessionId || getExistingSessionId(userId);
 
+    // Đọc cart từ localStorage (nếu có)
+    const cartData = getCartFromStorage();
+    
+    // Kiểm tra xem user có đang yêu cầu đặt hàng từ cart không
+    const isOrderRequest = /đặt|order|đơn hàng|giỏ hàng|cart/i.test(messageToSend);
+
     try {
       // Gọi qua backend proxy để tránh lỗi CORS
       const response = await fetch(`${API_URL}/api/n8n/chat`, {
@@ -250,7 +780,15 @@ const ChatBox: React.FC = () => {
           input: messageToSend,
           userId,
           sessionId: currentSessionId,
-          context: {},
+          context: {
+            // Gửi cart data nếu có và user đang yêu cầu đặt hàng
+            ...(isOrderRequest && cartData ? { 
+              cart: cartData,
+              hasCart: true 
+            } : {}),
+          },
+          // Gửi cart ở root level để AI dễ truy cập
+          ...(isOrderRequest && cartData ? { cart: cartData } : {}),
         }),
       });
 
@@ -264,11 +802,19 @@ const ChatBox: React.FC = () => {
       const reply = data.reply || 'Xin lỗi, tôi không thể trả lời ngay bây giờ.';
       const normalizedContext = normalizeChatContext(data.context || null);
 
+      // ✅ ĐỒNG BỘ CART TỪ AI RESPONSE VỀ FRONTEND
+      // Nếu AI trả về cart data (khi thêm/xem/cập nhật giỏ hàng), sync vào localStorage
+      if (data.cart) {
+        syncCartFromAI(data.cart);
+      } else if (data.context?.cart) {
+        syncCartFromAI(data.context.cart);
+      }
+
       const activeSessionId = data.sessionId || currentSessionId;
       setSessionId(activeSessionId);
       sessionStorage.setItem('n8n_session_id', activeSessionId);
 
-      setMessages(prev => [...prev, {
+      setMessages(prev => [...prev, { 
         text: reply,
         isUser: false,
         context: normalizedContext,
@@ -276,13 +822,48 @@ const ChatBox: React.FC = () => {
     } catch (error) {
       console.error('Error sending message to N8N:', error);
       const errorMessage = error instanceof Error ? error.message : 'Xin lỗi, đã có lỗi xảy ra khi kết nối với trợ lý.';
-      setMessages(prev => [...prev, {
+      setMessages(prev => [...prev, { 
         text: errorMessage,
         isUser: false,
       }]);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Sync cart từ AI response về localStorage
+  const syncCartFromAI = (cartData: any) => {
+    if (!cartData || !cartData.items || !Array.isArray(cartData.items)) {
+      return; // Không có cart data, bỏ qua
+    }
+
+    // Transform cart data từ AI format → localStorage format (match với CartPage.tsx)
+    const transformedItems = cartData.items.map((item: any) => {
+      // Format phải match với CartPage.tsx interface CartItem
+      return {
+        product: {
+          _id: item.productId || item.id,
+          id: item.productId || item.id,
+          name: item.name || 'Sản phẩm',
+          price: item.price || 0,
+          image: item.image || '', // Nếu có image
+        },
+        quantity: item.quantity || 1,
+      };
+    });
+
+    // Lưu vào localStorage
+    localStorage.setItem('cartItems', JSON.stringify(transformedItems));
+    
+    // Cập nhật cart count
+    const count = transformedItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
+    localStorage.setItem('cartCount', String(count));
+    
+    // Dispatch event để các component khác (CartPage, Header, etc.) biết cart đã thay đổi
+    window.dispatchEvent(new Event('storage'));
+    
+    console.log('✅ Đã đồng bộ giỏ hàng từ AI:', transformedItems);
+    message.success('Đã cập nhật giỏ hàng!', 1.5);
   };
 
   const handleAddToCart = (product: Product) => {
@@ -449,7 +1030,7 @@ const ChatBox: React.FC = () => {
   return (
     <>
       {!isOpen && (
-        <button
+        <button 
           className={`chat-button ${showScrollToTop ? 'scrolled' : ''}`}
           onClick={() => setIsOpen(true)}
         >
@@ -512,7 +1093,11 @@ const ChatBox: React.FC = () => {
                 className={`message ${message.isUser ? 'user' : 'ai'}`}
               >
                 <div className="message-content">
-                  <p className="message-text">{message.text}</p>
+                  <div className="message-text">
+                    <ReactMarkdown components={message.isUser ? undefined : markdownComponents}>
+                      {message.text}
+                    </ReactMarkdown>
+                  </div>
                   {message.context && (
                     <div className="message-context">
                       {renderProducts(message.context)}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FaShoppingCart, FaInfoCircle, FaComments, FaTimes } from 'react-icons/fa';
+import { FaShoppingCart, FaInfoCircle, FaComments, FaTimes, FaReceipt, FaCalendarAlt, FaUser, FaUserEdit } from 'react-icons/fa';
 import { useNavigate, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
@@ -520,11 +520,77 @@ const ChatBox: React.FC = () => {
     return '';
   };
 
-  // ✅ Custom markdown components để render product cards
+  // ✅ Helper: Kiểm tra xem có phải action card không
+  const getActionCardInfo = (text: string): { type: string; icon: React.ReactNode; link: string } | null => {
+    const lowerText = text.toLowerCase().trim();
+    
+    // Xem đơn hàng
+    if (lowerText.includes('xem đơn hàng') || lowerText.includes('đơn hàng của bạn')) {
+      return {
+        type: 'orders',
+        icon: <FaReceipt />,
+        link: '/profile/order'
+      };
+    }
+    
+    // Xem đặt bàn
+    if (lowerText.includes('xem đặt bàn') || lowerText.includes('đặt bàn của bạn')) {
+      return {
+        type: 'reservations',
+        icon: <FaCalendarAlt />,
+        link: '/dat-ban'
+      };
+    }
+    
+    // Xem giỏ hàng
+    if (lowerText.includes('xem giỏ hàng') || lowerText.includes('giỏ hàng của bạn')) {
+      return {
+        type: 'cart',
+        icon: <FaShoppingCart />,
+        link: '/cart'
+      };
+    }
+    
+    // Cập nhật thông tin cá nhân
+    if (lowerText.includes('cập nhật thông tin') || lowerText.includes('thông tin cá nhân')) {
+      return {
+        type: 'profile',
+        icon: <FaUserEdit />,
+        link: '/profile'
+      };
+    }
+    
+    return null;
+  };
+
+  // ✅ Custom markdown components để render product cards và action cards
   const markdownComponents: Components = {
     li: ({ children, ...props }) => {
       // Extract text từ children (có thể là React elements phức tạp)
       const childText = extractTextFromChildren(children);
+      
+      // ✅ Kiểm tra xem có phải action card không (ưu tiên cao hơn product)
+      const actionCardInfo = getActionCardInfo(childText);
+      if (actionCardInfo) {
+        return (
+          <li className="action-card-list-item" {...props}>
+            <Link 
+              to={actionCardInfo.link}
+              className="action-card-link-wrapper"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="action-card-inline">
+                <div className="action-card-icon-wrapper">
+                  {actionCardInfo.icon}
+                </div>
+                <div className="action-card-content">
+                  <span className="action-card-text">{childText}</span>
+                </div>
+              </div>
+            </Link>
+          </li>
+        );
+      }
       
       // ✅ Kiểm tra xem có phải product không (có pattern "Tên - giá" hoặc chỉ là tên món)
       const productInfo = extractProductInfo(childText);
@@ -583,46 +649,120 @@ const ChatBox: React.FC = () => {
       }
       
       if (shouldRenderAsProduct) {
+        // ✅ Kiểm tra xem có phải là cart item không (dựa trên context hoặc pattern)
+        // Nếu text xuất hiện trong context của giỏ hàng, thử lấy từ cart items
+        let cartItemImage: string | null = null;
+        let cartItemProductId: string | null = null;
+        
+        try {
+          const cartItems = JSON.parse(localStorage.getItem('cartItems') || '[]');
+          if (Array.isArray(cartItems) && cartItems.length > 0) {
+            // Tìm cart item có tên khớp với productName
+            const matchingCartItem = cartItems.find((item: any) => {
+              const itemName = item.product?.name || '';
+              const normalizedItemName = normalizeText(itemName);
+              const normalizedProductName = normalizeText(productName);
+              
+              // So sánh tên (case insensitive, không dấu)
+              return normalizedItemName === normalizedProductName ||
+                     normalizedItemName.includes(normalizedProductName) ||
+                     normalizedProductName.includes(normalizedItemName);
+            });
+            
+            if (matchingCartItem?.product) {
+              cartItemImage = matchingCartItem.product.image || null;
+              cartItemProductId = matchingCartItem.product._id || matchingCartItem.product.id || null;
+              
+              // Nếu có productId nhưng không có image, thử lấy từ productsCache
+              if (cartItemProductId && !cartItemImage) {
+                for (const cachedProduct of productsCache.values()) {
+                  if (cachedProduct.id === cartItemProductId) {
+                    cartItemImage = cachedProduct.image || null;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        } catch (error) {
+          // Silent fail
+        }
+        
         // Re-fetch từ cache để lấy image mới nhất (sau khi async fetch)
         const product = findProductInCache(productName);
         
-        // Nếu không có price từ extract, lấy từ product cache
-        if (!displayPrice && product?.price) {
-          displayPrice = `${product.price.toLocaleString('vi-VN')}₫`;
+        // Nếu không có price từ extract, lấy từ product cache hoặc cart item
+        if (!displayPrice) {
+          if (product?.price) {
+            displayPrice = `${product.price.toLocaleString('vi-VN')}₫`;
+          } else {
+            // Thử lấy từ cart item
+            try {
+              const cartItems = JSON.parse(localStorage.getItem('cartItems') || '[]');
+              const matchingCartItem = cartItems.find((item: any) => {
+                const itemName = item.product?.name || '';
+                const normalizedItemName = normalizeText(itemName);
+                const normalizedProductName = normalizeText(productName);
+                return normalizedItemName === normalizedProductName ||
+                       normalizedItemName.includes(normalizedProductName) ||
+                       normalizedProductName.includes(normalizedItemName);
+              });
+              if (matchingCartItem?.product?.price) {
+                displayPrice = `${matchingCartItem.product.price.toLocaleString('vi-VN')}₫`;
+              }
+            } catch (error) {
+              // Silent fail
+            }
+          }
         }
         
         const finalProductName = product?.name || productName;
-        const productSlug = product?.slug || `${removeVietnameseTones(productName)}-${product?.id || 'unknown'}`;
+        const productSlug = product?.slug || `${removeVietnameseTones(productName)}-${product?.id || cartItemProductId || 'unknown'}`;
         
-        // ✅ Lấy image URL với fallback fetch
+        // ✅ Lấy image URL với fallback: cart item → product cache → fetch API
         let imageUrl: string | null = null;
-        if (product?.image) {
+        
+        // Ưu tiên 1: Lấy từ cart item (nếu có)
+        if (cartItemImage) {
+          imageUrl = getImageUrl(cartItemImage);
+        } else if (product?.image) {
+          // Ưu tiên 2: Lấy từ product cache
           imageUrl = getImageUrl(product.image);
-        } else if (product?.id) {
-          // Nếu không có image trong cache, fetch product detail async
-          fetch(`${API_URL}/api/products/${product.id}`)
-            .then(res => res.json())
-            .then(data => {
-              const productDetail = data.data || data;
-              if (productDetail?.image) {
-                const updatedProduct = {
-                  ...product,
-                  image: productDetail.image
-                };
-                const normalizedName = normalizeText(product.name);
-                const originalName = product.name.toLowerCase().trim();
-                setProductsCache(prev => {
-                  const newCache = new Map(prev);
-                  newCache.set(normalizedName, updatedProduct);
-                  newCache.set(originalName, updatedProduct);
-                  return newCache;
-                });
-                setImageUpdateTrigger(prev => prev + 1);
-              }
-            })
-            .catch(() => {
-              // Silent fail
-            });
+        } else if (product?.id || cartItemProductId) {
+          // Ưu tiên 3: Fetch từ API
+          const productIdToFetch = product?.id || cartItemProductId;
+          if (productIdToFetch) {
+            // Nếu không có image trong cache, fetch product detail async
+            fetch(`${API_URL}/api/products/${productIdToFetch}`)
+              .then(res => res.json())
+              .then(data => {
+                const productDetail = data.data || data;
+                if (productDetail?.image) {
+                  const updatedProduct = product ? {
+                    ...product,
+                    image: productDetail.image
+                  } : {
+                    id: productIdToFetch,
+                    name: finalProductName,
+                    image: productDetail.image,
+                    price: productDetail.price,
+                    slug: productSlug
+                  };
+                  const normalizedName = normalizeText(product?.name || productName);
+                  const originalName = (product?.name || productName).toLowerCase().trim();
+                  setProductsCache(prev => {
+                    const newCache = new Map(prev);
+                    newCache.set(normalizedName, updatedProduct);
+                    newCache.set(originalName, updatedProduct);
+                    return newCache;
+                  });
+                  setImageUpdateTrigger(prev => prev + 1);
+                }
+              })
+              .catch(() => {
+                // Silent fail
+              });
+          }
         } else if (!product && productName.length > 3) {
           // ✅ Nếu không tìm thấy product trong cache, thử search để tìm
           // (có thể tên hơi khác một chút)
@@ -668,47 +808,58 @@ const ChatBox: React.FC = () => {
         // ✅ Sử dụng imageUpdateTrigger để đảm bảo re-render khi image được fetch
         const _ = imageUpdateTrigger; // eslint-disable-line
         
+        // ✅ Wrap toàn bộ card trong Link để có thể click vào bất kỳ đâu
+        const cardContent = (
+          <div className="product-card-inline">
+            {/* ✅ Luôn hiển thị image wrapper (có placeholder nếu không có image) */}
+            <div className="product-card-image-wrapper">
+              {imageUrl ? (
+                <img 
+                  src={imageUrl} 
+                  alt={finalProductName}
+                  className="product-card-image"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                  loading="lazy"
+                />
+              ) : (
+                // Placeholder icon khi không có image
+                <div className="product-card-placeholder">
+                  <span style={{ fontSize: '32px', opacity: 0.3 }}>🍽️</span>
+                </div>
+              )}
+            </div>
+            <div className="product-card-content">
+              <span className="product-card-name">
+                {finalProductName}
+              </span>
+              {displayPrice && (
+                <span className="product-card-price">{displayPrice}</span>
+              )}
+            </div>
+          </div>
+        );
+
+        // ✅ Nếu có product, wrap trong Link để có thể click vào bất kỳ đâu
+        if (product) {
+          return (
+            <li className="product-list-item" {...props}>
+              <Link 
+                to={`/menu/${productSlug}`}
+                className="product-card-link-wrapper"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {cardContent}
+              </Link>
+            </li>
+          );
+        }
+
+        // ✅ Nếu không có product, chỉ hiển thị card (không clickable)
         return (
           <li className="product-list-item" {...props}>
-            <div className="product-card-inline">
-              {/* ✅ Luôn hiển thị image wrapper (có placeholder nếu không có image) */}
-              <div className="product-card-image-wrapper">
-                {imageUrl ? (
-                  <img 
-                    src={imageUrl} 
-                    alt={finalProductName}
-                    className="product-card-image"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none';
-                    }}
-                    loading="lazy"
-                  />
-                ) : (
-                  // Placeholder icon khi không có image
-                  <div className="product-card-placeholder">
-                    <span style={{ fontSize: '32px', opacity: 0.3 }}>🍽️</span>
-                  </div>
-                )}
-              </div>
-              <div className="product-card-content">
-                {product ? (
-                  <Link 
-                    to={`/menu/${productSlug}`}
-                    className="product-card-name"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {finalProductName}
-                  </Link>
-                ) : (
-                  <span className="product-card-name" style={{ cursor: 'default' }}>
-                    {finalProductName}
-                  </span>
-                )}
-                {displayPrice && (
-                  <span className="product-card-price">{displayPrice}</span>
-                )}
-              </div>
-            </div>
+            {cardContent}
           </li>
         );
       }
@@ -765,11 +916,17 @@ const ChatBox: React.FC = () => {
 
     const currentSessionId = sessionId || getExistingSessionId(userId);
 
-    // Đọc cart từ localStorage (nếu có)
+    // ✅ Đọc cart từ localStorage (nếu có) - LUÔN gửi cart thực tế lên AI
     const cartData = getCartFromStorage();
     
-    // Kiểm tra xem user có đang yêu cầu đặt hàng từ cart không
-    const isOrderRequest = /đặt|order|đơn hàng|giỏ hàng|cart/i.test(messageToSend);
+    // ✅ Kiểm tra xem user có đang yêu cầu đặt hàng hoặc hỏi về giỏ hàng không
+    // Mở rộng pattern matching để bắt nhiều cách hỏi hơn
+    const isOrderRequest = /đặt|order|đơn hàng|thanh toán|checkout/i.test(messageToSend);
+    const isCartQuery = /giỏ hàng|cart|xem giỏ|món trong giỏ|món nào|món ăn nào|có gì trong giỏ|bạn có|tôi có/i.test(messageToSend);
+    
+    // ✅ Nếu có cart và user hỏi về bất kỳ điều gì liên quan đến món ăn/giỏ hàng, LUÔN gửi cart
+    // Để AI có thể trả lời chính xác về cart hiện tại
+    const shouldSendCart = cartData && (isOrderRequest || isCartQuery || cartData.items.length > 0);
 
     try {
       // Gọi qua backend proxy để tránh lỗi CORS
@@ -781,14 +938,25 @@ const ChatBox: React.FC = () => {
           userId,
           sessionId: currentSessionId,
           context: {
-            // Gửi cart data nếu có và user đang yêu cầu đặt hàng
-            ...(isOrderRequest && cartData ? { 
+            // ✅ LUÔN gửi cart data nếu có (khi đặt hàng, hỏi về giỏ hàng, hoặc có món trong giỏ)
+            // Để AI luôn thấy cart thực tế (bao gồm món được thêm bằng tay)
+            ...(shouldSendCart ? { 
               cart: cartData,
-              hasCart: true 
+              hasCart: true,
+              cartItemsCount: cartData.items.length,
+              cartTotal: cartData.total
             } : {}),
           },
-          // Gửi cart ở root level để AI dễ truy cập
-          ...(isOrderRequest && cartData ? { cart: cartData } : {}),
+          // ✅ Gửi cart ở root level để AI dễ truy cập (ưu tiên cao)
+          ...(shouldSendCart ? { 
+            cart: cartData,
+            metadata: {
+              hasCart: true,
+              cartItemsCount: cartData.items.length,
+              cartTotal: cartData.total,
+              source: 'localStorage' // Đánh dấu cart từ localStorage (cart thực tế)
+            }
+          } : {}),
         }),
       });
 
@@ -831,38 +999,132 @@ const ChatBox: React.FC = () => {
     }
   };
 
-  // Sync cart từ AI response về localStorage
+  // Sync cart từ AI response về localStorage - MERGE với cart hiện tại (không ghi đè)
   const syncCartFromAI = (cartData: any) => {
     if (!cartData || !cartData.items || !Array.isArray(cartData.items)) {
       return; // Không có cart data, bỏ qua
     }
 
-    // Transform cart data từ AI format → localStorage format (match với CartPage.tsx)
-    const transformedItems = cartData.items.map((item: any) => {
+    // ✅ Lấy cart hiện tại từ localStorage (bao gồm các món được thêm bằng tay)
+    let currentCartItems: any[] = [];
+    try {
+      currentCartItems = JSON.parse(localStorage.getItem('cartItems') || '[]');
+    } catch (error) {
+      currentCartItems = [];
+    }
+
+    // ✅ Merge: Cập nhật/cập nhật các món từ AI, giữ lại các món khác
+    const aiItemsMap = new Map<string, any>();
+    
+    // Transform cart data từ AI format → localStorage format
+    cartData.items.forEach((item: any) => {
+      const productId = item.productId || item.id;
+      if (!productId) return;
+      
+      let image = item.image || '';
+      
+      // ✅ Nếu không có image từ AI, thử lấy từ productsCache
+      if (!image && productId) {
+        for (const cachedProduct of productsCache.values()) {
+          if (cachedProduct.id === productId) {
+            image = cachedProduct.image || '';
+            break;
+          }
+        }
+      }
+      
+      // ✅ Nếu vẫn không có image, fetch từ API (async)
+      if (!image && productId) {
+        fetch(`${API_URL}/api/products/${productId}`)
+          .then(res => res.json())
+          .then(data => {
+            const productDetail = data.data || data;
+            if (productDetail?.image) {
+              // Cập nhật cart item với image mới
+              try {
+                const cartItems = JSON.parse(localStorage.getItem('cartItems') || '[]');
+                const itemIndex = cartItems.findIndex((cartItem: any) => 
+                  (cartItem.product?._id === productId) || (cartItem.product?.id === productId)
+                );
+                if (itemIndex >= 0) {
+                  cartItems[itemIndex].product.image = productDetail.image;
+                  localStorage.setItem('cartItems', JSON.stringify(cartItems));
+                  window.dispatchEvent(new Event('storage'));
+                }
+              } catch (error) {
+                // Silent fail
+              }
+            }
+          })
+          .catch(() => {
+            // Silent fail
+          });
+      }
+      
       // Format phải match với CartPage.tsx interface CartItem
-      return {
+      aiItemsMap.set(productId, {
         product: {
-          _id: item.productId || item.id,
-          id: item.productId || item.id,
+          _id: productId,
+          id: productId,
           name: item.name || 'Sản phẩm',
           price: item.price || 0,
-          image: item.image || '', // Nếu có image
+          image: image, // Image từ AI hoặc cache
         },
         quantity: item.quantity || 1,
-      };
+      });
     });
 
-    // Lưu vào localStorage
-    localStorage.setItem('cartItems', JSON.stringify(transformedItems));
+    // ✅ Merge: Giữ lại các món không có trong AI response (được thêm bằng tay)
+    const mergedCartItems: any[] = [];
+    const processedProductIds = new Set<string>();
+    
+    // 1. Thêm/cập nhật các món từ AI
+    aiItemsMap.forEach((aiItem, productId) => {
+      const existingIndex = currentCartItems.findIndex((item: any) => 
+        (item.product?._id === productId) || (item.product?.id === productId)
+      );
+      
+      if (existingIndex >= 0) {
+        // Cập nhật món đã có (có thể từ AI hoặc từ tay)
+        mergedCartItems.push(aiItem);
+      } else {
+        // Thêm món mới từ AI
+        mergedCartItems.push(aiItem);
+      }
+      processedProductIds.add(productId);
+    });
+    
+    // 2. Giữ lại các món không có trong AI response (được thêm bằng tay)
+    currentCartItems.forEach((item: any) => {
+      const productId = item.product?._id || item.product?.id;
+      if (productId && !processedProductIds.has(productId)) {
+        // Món này không có trong AI response → giữ lại (được thêm bằng tay)
+        mergedCartItems.push(item);
+      }
+    });
+
+    // ✅ Lưu cart đã merge vào localStorage
+    localStorage.setItem('cartItems', JSON.stringify(mergedCartItems));
     
     // Cập nhật cart count
-    const count = transformedItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
+    const count = mergedCartItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
     localStorage.setItem('cartCount', String(count));
     
     // Dispatch event để các component khác (CartPage, Header, etc.) biết cart đã thay đổi
     window.dispatchEvent(new Event('storage'));
     
-    console.log('✅ Đã đồng bộ giỏ hàng từ AI:', transformedItems);
+    // ✅ Sync cart lên server
+    import('../utils/cartSync').then(({ syncCartToServer }) => {
+      syncCartToServer(mergedCartItems);
+    }).catch((error) => {
+      console.error('Failed to sync cart:', error);
+    });
+    
+    console.log('✅ Đã merge giỏ hàng từ AI với cart hiện tại:', {
+      aiItems: cartData.items.length,
+      currentItems: currentCartItems.length,
+      mergedItems: mergedCartItems.length
+    });
     message.success('Đã cập nhật giỏ hàng!', 1.5);
   };
 
@@ -887,6 +1149,14 @@ const ChatBox: React.FC = () => {
     const count = cartItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
     localStorage.setItem('cartCount', String(count));
     window.dispatchEvent(new Event('storage'));
+    
+    // ✅ Sync cart lên server
+    import('../utils/cartSync').then(({ syncCartToServer }) => {
+      syncCartToServer(cartItems);
+    }).catch((error) => {
+      console.error('Failed to sync cart:', error);
+    });
+    
     message.success('Đã thêm vào giỏ hàng!', 1.5);
   };
 

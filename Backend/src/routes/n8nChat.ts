@@ -42,12 +42,24 @@ router.post('/chat', async (req, res) => {
       });
     }
 
-    console.log('🔄 Calling n8nService.sendMessage...');
+    // ✅ Extract cart từ request body (có thể ở root hoặc trong context)
+    const cartData = req.body.cart || context?.cart || null;
+    
+    console.log('🔄 Calling n8nService.sendMessage...', {
+      hasCart: !!cartData,
+      cartItemsCount: cartData?.items?.length || 0,
+      cartTotal: cartData?.total || 0
+    });
+    
     const response = await n8nService.sendMessage({
       input: messageText.trim(),
       userId,
       sessionId,
-      context: context || {},
+      context: {
+        ...(context || {}),
+        // ✅ Đảm bảo cart được truyền vào context
+        ...(cartData ? { cart: cartData } : {}),
+      },
     });
 
     console.log('📤 N8N Service response:', {

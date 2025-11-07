@@ -208,7 +208,15 @@ const Header: React.FC = () => {
     { key: '/combo', label: 'COMBO' },
   ];
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // ✅ Clear cart trên server trước khi logout
+    try {
+      const { clearCartOnServer } = await import('../../utils/cartSync');
+      await clearCartOnServer();
+    } catch (error) {
+      console.error('Failed to clear cart on server:', error);
+    }
+    
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('cartItems');

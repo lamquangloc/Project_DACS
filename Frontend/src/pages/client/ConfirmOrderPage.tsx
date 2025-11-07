@@ -45,6 +45,14 @@ const ConfirmOrderPage: React.FC = () => {
     // Reset giỏ hàng giống logic COD
     localStorage.removeItem('cartItems');
     localStorage.setItem('cartCount', '0');
+    
+    // ✅ Clear cart trên server
+    import('../../utils/cartSync').then(({ clearCartOnServer }) => {
+      clearCartOnServer();
+    }).catch((error) => {
+      console.error('Failed to clear cart on server:', error);
+    });
+    
     window.dispatchEvent(new Event('storage'));
     // Lấy thông tin đơn hàng từ localStorage (hoặc truyền qua state/location)
     const orderData = localStorage.getItem('lastOrder');

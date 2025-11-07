@@ -60,7 +60,25 @@ class N8nService {
       const generatedSessionId = request.sessionId || `session_${request.userId}_${Date.now()}`;
       
       // Extract cart data từ context (nếu có)
-      const cartData = request.context?.cart || null;
+      let cartData = request.context?.cart || null;
+      
+      // Nếu không có cart trong request, thử lấy từ database
+      if (!cartData || !cartData.items || cartData.items.length === 0) {
+        try {
+          const cartService = (await import('./cart.service')).default;
+          const dbCart = await cartService.getCart(request.userId);
+          if (dbCart && dbCart.items && dbCart.items.length > 0) {
+            cartData = dbCart;
+            console.log('📦 Cart loaded from database:', {
+              itemsCount: dbCart.items.length,
+              total: dbCart.total
+            });
+          }
+        } catch (error) {
+          console.error('Failed to load cart from database:', error);
+          // Tiếp tục với cartData = null
+        }
+      }
       
       const payload = {
         // Chat Trigger Node sẽ nhận các field này từ Webhook body
@@ -75,7 +93,7 @@ class N8nService {
           // Forward cart data nếu có
           ...(cartData ? { cart: cartData, hasCart: true } : {}),
         },
-        // Gửi cart ở root level để AI dễ truy cập
+        // ✅ Gửi cart ở root level để AI dễ truy cập (QUAN TRỌNG!)
         ...(cartData ? { cart: cartData } : {}),
         timestamp: new Date().toISOString(),
         // Thêm metadata cho AI Agent
@@ -84,11 +102,12 @@ class N8nService {
           userType: 'user', // hoặc 'admin' tùy theo logic
           conversationId: generatedSessionId,
           sessionId: generatedSessionId, // Thêm vào metadata để chắc chắn
-          // Thêm cart info vào metadata để AI biết có cart không
+          // ✅ Thêm cart info vào metadata để AI biết có cart không
           ...(cartData ? { 
             hasCart: true,
             cartItemsCount: cartData.items?.length || 0,
-            cartTotal: cartData.total || 0
+            cartTotal: cartData.total || 0,
+            source: 'localStorage' // Đánh dấu cart từ localStorage (cart thực tế)
           } : {}),
         },
         // Đảm bảo sessionId được expose ở nhiều level

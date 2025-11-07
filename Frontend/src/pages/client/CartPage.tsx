@@ -58,6 +58,26 @@ const CartPage: React.FC = () => {
         setUserName(user.name);
       }
     } catch {}
+    
+    // ✅ Load cart từ server khi component mount (nếu đã login)
+    const loadCartOnMount = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (token) {
+          const { loadCartFromServer } = await import('../../utils/cartSync');
+          const loadedCart = await loadCartFromServer();
+          if (loadedCart && loadedCart.length > 0) {
+            setCartItems(loadedCart);
+            const count = loadedCart.reduce((sum: number, item: any) => sum + item.quantity, 0);
+            localStorage.setItem('cartCount', String(count));
+            window.dispatchEvent(new Event('storage'));
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load cart on mount:', error);
+      }
+    };
+    loadCartOnMount();
   }, []);
 
   useEffect(() => {
@@ -118,7 +138,7 @@ const CartPage: React.FC = () => {
     setLoading(false);
   };
 
-  const handleQuantityChange = (itemId: string, newQuantity: number) => {
+  const handleQuantityChange = async (itemId: string, newQuantity: number) => {
     if (newQuantity < 1) return;
     let items = cartItems.map(i => {
       const id = i.product?._id || i.combo?._id;
@@ -129,15 +149,29 @@ const CartPage: React.FC = () => {
     const count = items.reduce((sum, item) => sum + item.quantity, 0);
     localStorage.setItem('cartCount', String(count));
     window.dispatchEvent(new Event('storage'));
+    
+    // ✅ Sync cart lên server
+    import('../../utils/cartSync').then(({ syncCartToServer }) => {
+      syncCartToServer(items);
+    }).catch((error) => {
+      console.error('Failed to sync cart:', error);
+    });
   };
 
-  const handleRemoveItem = (itemId: string) => {
+  const handleRemoveItem = async (itemId: string) => {
     let items = cartItems.filter(i => (i.product?._id || i.combo?._id) !== itemId);
     localStorage.setItem('cartItems', JSON.stringify(items));
     setCartItems(items);
     const count = items.reduce((sum, item) => sum + item.quantity, 0);
     localStorage.setItem('cartCount', String(count));
     window.dispatchEvent(new Event('storage'));
+    
+    // ✅ Sync cart lên server
+    import('../../utils/cartSync').then(({ syncCartToServer }) => {
+      syncCartToServer(items);
+    }).catch((error) => {
+      console.error('Failed to sync cart:', error);
+    });
   };
 
   const handleOrder = async () => {

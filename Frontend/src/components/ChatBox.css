@@ -876,6 +876,18 @@
   margin: 0 0 12px 0;
 }
 
+/* ✅ Link wrapper để toàn bộ card có thể click */
+.product-card-link-wrapper {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  width: 100%;
+}
+
+.product-card-link-wrapper:hover {
+  text-decoration: none;
+}
+
 .product-card-inline {
   display: flex;
   align-items: center;
@@ -888,6 +900,14 @@
   transition: all 0.3s ease;
   cursor: pointer;
   min-height: 80px;
+  width: 100%;
+}
+
+.product-card-link-wrapper:hover .product-card-inline {
+  transform: translateY(-2px);
+  border-color: #1976d2;
+  box-shadow: 0 4px 16px rgba(25, 118, 210, 0.15);
+  background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%);
 }
 
 .product-card-inline:hover {
@@ -963,11 +983,16 @@
   line-height: 1.4;
   word-wrap: break-word;
   overflow-wrap: break-word;
+  display: block;
 }
 
-.product-card-name:hover {
+/* Khi hover vào card, tên món cũng đổi màu */
+.product-card-link-wrapper:hover .product-card-name {
   color: #1976d2;
-  text-decoration: underline;
+}
+
+.product-card-inline:hover .product-card-name {
+  color: #1976d2;
 }
 
 .product-card-price {
@@ -1006,6 +1031,127 @@
 
   .product-card-price {
     font-size: 16px;
+  }
+}
+
+/* ✅ Action Cards trong Markdown List */
+.message-text .action-card-list-item {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px 0;
+}
+
+/* ✅ Link wrapper để toàn bộ action card có thể click */
+.action-card-link-wrapper {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  width: 100%;
+}
+
+.action-card-link-wrapper:hover {
+  text-decoration: none;
+}
+
+.action-card-inline {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+  border: 1.5px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  min-height: 70px;
+  width: 100%;
+}
+
+.action-card-link-wrapper:hover .action-card-inline {
+  transform: translateY(-2px);
+  border-color: #1976d2;
+  box-shadow: 0 4px 16px rgba(25, 118, 210, 0.15);
+  background: linear-gradient(135deg, #ffffff 0%, #e3f2fd 100%);
+}
+
+.action-card-inline:hover {
+  transform: translateY(-2px);
+  border-color: #1976d2;
+  box-shadow: 0 4px 16px rgba(25, 118, 210, 0.15);
+  background: linear-gradient(135deg, #ffffff 0%, #e3f2fd 100%);
+}
+
+.action-card-icon-wrapper {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 24px;
+  box-shadow: 0 2px 8px rgba(25, 118, 210, 0.2);
+  transition: all 0.3s ease;
+}
+
+.action-card-link-wrapper:hover .action-card-icon-wrapper {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3);
+}
+
+.action-card-inline:hover .action-card-icon-wrapper {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3);
+}
+
+.action-card-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.action-card-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a1a1a;
+  text-decoration: none;
+  transition: color 0.2s ease;
+  line-height: 1.4;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  display: block;
+}
+
+/* Khi hover vào card, text cũng đổi màu */
+.action-card-link-wrapper:hover .action-card-text {
+  color: #1976d2;
+}
+
+.action-card-inline:hover .action-card-text {
+  color: #1976d2;
+}
+
+/* Responsive cho Action Cards */
+@media (max-width: 768px) {
+  .action-card-inline {
+    padding: 12px 14px;
+    gap: 12px;
+    min-height: 64px;
+  }
+
+  .action-card-icon-wrapper {
+    width: 48px;
+    height: 48px;
+    font-size: 20px;
+  }
+
+  .action-card-text {
+    font-size: 14px;
   }
 }
 

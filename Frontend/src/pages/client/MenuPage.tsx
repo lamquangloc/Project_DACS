@@ -76,7 +76,7 @@ const MenuPage: React.FC = () => {
       .catch(() => setLoading(false));
   }, [selectedCat]);
 
-  const handleAddToCart = (product: any, e?: React.MouseEvent<HTMLButtonElement>) => {
+  const handleAddToCart = async (product: any, e?: React.MouseEvent<HTMLButtonElement>) => {
     const token = localStorage.getItem('token');
     const user = localStorage.getItem('user');
     if (!token || !user) {
@@ -111,6 +111,13 @@ const MenuPage: React.FC = () => {
     const count = cartItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
     localStorage.setItem('cartCount', String(count));
     window.dispatchEvent(new Event('storage'));
+    
+    // ✅ Sync cart lên server
+    const { syncCartToServer } = await import('../../utils/cartSync');
+    syncCartToServer(cartItems).catch((error) => {
+      console.error('Failed to sync cart:', error);
+    });
+    
     message.success('Đã thêm vào giỏ hàng!', 1.5);
   };
 

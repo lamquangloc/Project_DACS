@@ -54,6 +54,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem('token', response.token);
       localStorage.setItem('user', JSON.stringify(response.user));
       setUser(response.user);
+      
+      // ✅ Load cart từ server sau khi login
+      try {
+        const { loadCartFromServer } = await import('../utils/cartSync');
+        const loadedCart = await loadCartFromServer();
+        // Dispatch event để các component khác (CartPage, Header, etc.) biết cart đã thay đổi
+        window.dispatchEvent(new Event('storage'));
+        console.log('✅ Cart loaded and synced:', loadedCart.length, 'items');
+      } catch (error) {
+        console.error('❌ Failed to load cart from server:', error);
+      }
     } catch (error) {
       console.error('Login failed:', error);
       throw error;
@@ -77,7 +88,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    // ✅ Clear cart trên server trước khi logout
+    try {
+      const { clearCartOnServer } = await import('../utils/cartSync');
+      await clearCartOnServer();
+    } catch (error) {
+      console.error('Failed to clear cart on server:', error);
+    }
+    
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);

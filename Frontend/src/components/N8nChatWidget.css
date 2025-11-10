@@ -1,0 +1,43 @@
+/* Using native n8n floating UI; no container needed */
+
+@keyframes slideIn {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* removed custom header so only native n8n header shows */
+
+/* No custom wrapper for widget now */
+
+/* Override N8n chat internal styles to blend with site */
+.n8n-chat-widget .chat-container {
+  height: 100%;
+}
+.n8n-chat-widget .chat-header,
+.n8n-chat-widget .header {
+  background: #111827 !important;
+  color: #fff !important;
+}
+.n8n-chat-widget .message.user {
+  background: #111827 !important;
+  color: #fff !important;
+}
+.n8n-chat-widget .message.bot {
+  background: #f3f4f6 !important;
+  color: #111827 !important;
+}
+.n8n-chat-widget button,
+.n8n-chat-widget .send-button {
+  background: #111827 !important;
+  color: #fff !important;
+  border: none !important;
+}
+
+/* Mobile responsiveness */
+/* No responsive wrapper needed */

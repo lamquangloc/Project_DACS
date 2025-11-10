@@ -6,6 +6,7 @@ import { useInView } from 'react-intersection-observer';
 import { message } from 'antd';
 import ScrollToTopButton from '../../components/ui/ScrollToTopButton';
 import { useNavigate } from 'react-router-dom';
+import { syncCartToServer } from '../../utils/cartSync';
 
 const heroImages = [
   'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=1200&q=80',
@@ -207,6 +208,10 @@ const Home: React.FC = () => {
       setCartCount(count);
       localStorage.setItem('cartCount', String(count));
       window.dispatchEvent(new Event('storage'));
+      
+      // ✅ Sync cart lên server
+      syncCartToServer(cartItems);
+      
       message.success('Đã thêm vào giỏ hàng!', 1.5);
     } catch (error) {
       message.error('Thêm vào giỏ hàng thất bại!');

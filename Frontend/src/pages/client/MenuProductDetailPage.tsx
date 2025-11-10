@@ -94,6 +94,14 @@ const MenuProductDetailPage: React.FC = () => {
     const count = cartItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
     localStorage.setItem('cartCount', String(count));
     window.dispatchEvent(new Event('storage'));
+    
+    // ✅ Sync cart lên server
+    import('../../utils/cartSync').then(({ syncCartToServer }) => {
+      syncCartToServer(cartItems);
+    }).catch((error) => {
+      console.error('Failed to sync cart:', error);
+    });
+    
     message.success('Đã thêm vào giỏ hàng!', 1.5);
     setQuantity(1);
   };

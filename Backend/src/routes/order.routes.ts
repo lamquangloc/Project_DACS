@@ -2,10 +2,14 @@ import { Router } from 'express';
 import { OrderController } from '../controllers/order.controller';
 import { isAuthenticated } from '../middleware/auth.middleware';
 import { isAdmin } from '../middleware/admin.middleware';
+import { chatBotAuth } from '../middleware/chatbot.middleware';
 
 const router = Router();
 
 router.get('/vnpay-return', OrderController.vnpayReturn);
+
+// Chatbot route (không cần user auth, dùng secret key)
+router.post('/chatbot', chatBotAuth, OrderController.createOrderFromChatbot);
 
 // Protected routes (User)
 router.post('/', isAuthenticated, OrderController.createOrder);

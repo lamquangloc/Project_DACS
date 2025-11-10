@@ -110,6 +110,134 @@ export class OrderController {
     return;
   }
 
+  /**
+   * Tạo đơn hàng từ chatbot (không yêu cầu đầy đủ thông tin như user order)
+   */
+  static async createOrderFromChatbot(req: Request, res: Response, _next: NextFunction) {
+    try {
+      const { userId, items, totalAmount, total, status, sessionId, source, address, phoneNumber, note, paymentStatus } = req.body;
+
+      // Validation (ít field hơn, phù hợp với chatbot)
+      if (!userId || !items || !Array.isArray(items) || items.length === 0 || (!totalAmount && !total)) {
+        return res.status(400).json({
+          success: false,
+          status: 'error',
+          error: 'Missing required fields',
+          message: 'Thiếu thông tin bắt buộc: userId, items, totalAmount',
+          details: {
+            hasUserId: !!userId,
+            hasItems: !!items,
+            itemsLength: items?.length || 0,
+            hasTotal: !!(totalAmount || total)
+          }
+        });
+      }
+
+      const finalTotal = totalAmount || total;
+
+      // Validate items format
+      const validItems = items.filter((item: any) => 
+        item && (item.productId || item.comboId) && item.quantity && item.price
+      );
+
+      if (validItems.length === 0) {
+        return res.status(400).json({
+          success: false,
+          status: 'error',
+          error: 'Invalid items format',
+          message: 'Items phải có productId hoặc comboId, quantity, và price'
+        });
+      }
+
+      // Get the next order number
+      const sequence = await prisma.sequence.upsert({
+        where: { name: 'order' },
+        update: { value: { increment: 1 } },
+        create: { name: 'order', value: 1 }
+      });
+
+      // Generate order code
+      const orderCode = generateOrderCode(sequence.value);
+
+      // Tạo order với default values cho các field không bắt buộc
+      const order = await prisma.order.create({
+        data: {
+          orderNumber: sequence.value,
+          orderCode,
+          userId,
+          total: Number(finalTotal),
+          // Default values cho chatbot orders (có thể cập nhật sau)
+          address: address || 'Chưa có địa chỉ - Đơn từ chatbot',
+          phoneNumber: phoneNumber || 'Chưa có số điện thoại',
+          provinceCode: req.body.provinceCode || '',
+          provinceName: req.body.provinceName || '',
+          districtCode: req.body.districtCode || '',
+          districtName: req.body.districtName || '',
+          wardCode: req.body.wardCode || '',
+          wardName: req.body.wardName || '',
+          note: note || `Đơn từ chatbot${sessionId ? ` (session: ${sessionId})` : ''}${source ? ` - ${source}` : ''}`,
+          paymentStatus: paymentStatus || 'PENDING',
+          status: status || 'PENDING',
+          items: {
+            create: validItems.map((item: any) => ({
+              productId: item.productId || null,
+              comboId: item.comboId || null,
+              quantity: Number(item.quantity) || 1,
+              price: Number(item.price) || 0
+            }))
+          }
+        },
+        include: {
+          items: {
+            include: {
+              product: true,
+              combo: true
+            }
+          },
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              phone: true
+            }
+          }
+        }
+      });
+
+      res.status(201).json({
+        success: true,
+        status: 'success',
+        message: 'Order created successfully from chatbot',
+        data: {
+          id: order.id,
+          orderCode: order.orderCode,
+          userId: order.userId,
+          items: order.items,
+          total: order.total,
+          status: order.status,
+          createdAt: order.createdAt
+        },
+        order: {
+          id: order.id,
+          orderCode: order.orderCode,
+          userId: order.userId,
+          items: order.items,
+          total: order.total,
+          status: order.status
+        }
+      });
+    } catch (error) {
+      console.error('Error creating order from chatbot:', error);
+      res.status(500).json({
+        success: false,
+        status: 'error',
+        error: 'Failed to create order',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
   static async getMyOrders(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.user) {

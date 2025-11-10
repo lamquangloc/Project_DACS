@@ -42,19 +42,48 @@ if (!fs.existsSync(categoryUploadsDir)) {
   fs.mkdirSync(categoryUploadsDir);
 }
 
-// Middleware
-app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL!,
-    process.env.ADMIN_URL!,
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://localhost:5000'
-  ].filter(Boolean),
+// Middleware - CORS configuration
+const corsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      process.env.FRONTEND_URL!,
+      process.env.ADMIN_URL!,
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://localhost:5000'
+    ].filter(Boolean);
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // Allow ngrok domains (for n8n cloud)
+    if (origin.includes('.ngrok.io') || origin.includes('.ngrok-free.app')) {
+      return callback(null, true);
+    }
+    
+    // Allow n8n cloud domains
+    if (origin.includes('.n8n.cloud')) {
+      return callback(null, true);
+    }
+    
+    // For development, allow all origins
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept']
-}));
+};
+
+app.use(cors(corsOptions));
 app.use(helmet({
   crossOriginResourcePolicy: {
     policy: "cross-origin"

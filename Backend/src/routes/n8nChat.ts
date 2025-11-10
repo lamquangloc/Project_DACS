@@ -45,8 +45,12 @@ router.post('/chat', async (req, res) => {
     // ✅ Extract cart từ request body (có thể ở root hoặc trong context)
     const cartData = req.body.cart || context?.cart || null;
     
+    // ✅ Lấy token từ request (có thể từ header hoặc body)
+    const token = req.headers.authorization?.split(' ')[1] || req.body.token;
+    
     console.log('🔄 Calling n8nService.sendMessage...', {
       hasCart: !!cartData,
+      hasToken: !!token,
       cartItemsCount: cartData?.items?.length || 0,
       cartTotal: cartData?.total || 0
     });
@@ -60,6 +64,8 @@ router.post('/chat', async (req, res) => {
         // ✅ Đảm bảo cart được truyền vào context
         ...(cartData ? { cart: cartData } : {}),
       },
+      // ✅ Thêm token vào request để AI có thể dùng cho tool "carts Save"
+      token: token,
     });
 
     console.log('📤 N8N Service response:', {

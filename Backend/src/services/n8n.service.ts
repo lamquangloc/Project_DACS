@@ -8,6 +8,7 @@ interface N8nRequest {
   userId: string;
   sessionId?: string;
   context?: any;
+  token?: string; // ✅ Token để authenticate với backend API
 }
 
 interface N8nResponse {
@@ -58,6 +59,9 @@ class N8nService {
       // Format dữ liệu phù hợp với N8N workflow
       // N8N Chat Trigger Node expects specific format
       const generatedSessionId = request.sessionId || `session_${request.userId}_${Date.now()}`;
+      
+      // ✅ Lấy token từ request (để AI có thể dùng cho tool "carts Save")
+      const token = request.token || null;
       
       // Extract cart data từ context (nếu có)
       let cartData = request.context?.cart || null;
@@ -112,6 +116,8 @@ class N8nService {
         },
         // Đảm bảo sessionId được expose ở nhiều level
         'chat-session-id': generatedSessionId,
+        // ✅ Gửi token để tool có thể dùng
+        token: token, // Token để authenticate với backend API
       };
 
       console.log('🌐 Sending request to N8N webhook:', this.webhookUrl);

@@ -928,15 +928,29 @@ const ChatBox: React.FC = () => {
     // Để AI có thể trả lời chính xác về cart hiện tại
     const shouldSendCart = cartData && (isOrderRequest || isCartQuery || cartData.items.length > 0);
 
+    // ✅ Lấy token từ localStorage để gửi cho backend
+    const token = localStorage.getItem('token');
+
     try {
       // Gọi qua backend proxy để tránh lỗi CORS
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // ✅ Thêm Authorization header nếu có token
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await fetch(`${API_URL}/api/n8n/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           input: messageToSend,
           userId,
           sessionId: currentSessionId,
+          // ✅ Gửi token trong body để đảm bảo backend nhận được
+          ...(token ? { token } : {}),
           context: {
             // ✅ LUÔN gửi cart data nếu có (khi đặt hàng, hỏi về giỏ hàng, hoặc có món trong giỏ)
             // Để AI luôn thấy cart thực tế (bao gồm món được thêm bằng tay)
@@ -971,11 +985,23 @@ const ChatBox: React.FC = () => {
       const normalizedContext = normalizeChatContext(data.context || null);
 
       // ✅ ĐỒNG BỘ CART TỪ AI RESPONSE VỀ FRONTEND
-      // Nếu AI trả về cart data (khi thêm/xem/cập nhật giỏ hàng), sync vào localStorage
+      // Nếu AI trả về cart data (khi thêm/xem/cập nhật/xóa giỏ hàng), sync vào localStorage
       if (data.cart) {
         syncCartFromAI(data.cart);
       } else if (data.context?.cart) {
         syncCartFromAI(data.context.cart);
+      } else {
+        // ✅ Nếu không có cart data nhưng reply có từ khóa "xóa toàn bộ" hoặc "clear cart"
+        // → Clear cart trong localStorage để đồng bộ với database
+        const replyLower = reply.toLowerCase();
+        if (replyLower.includes('xóa toàn bộ') || 
+            replyLower.includes('xóa hết giỏ hàng') || 
+            replyLower.includes('làm trống giỏ hàng') ||
+            replyLower.includes('clear cart') ||
+            replyLower.includes('đã xóa toàn bộ')) {
+          console.log('✅ Phát hiện từ khóa xóa toàn bộ trong reply, clear cart trong localStorage');
+          syncCartFromAI({ items: [], total: 0 });
+        }
       }
 
       const activeSessionId = data.sessionId || currentSessionId;
@@ -999,13 +1025,25 @@ const ChatBox: React.FC = () => {
     }
   };
 
-  // Sync cart từ AI response về localStorage - MERGE với cart hiện tại (không ghi đè)
+  // Sync cart từ AI response về localStorage - REPLACE hoàn toàn (để đồng bộ với database)
   const syncCartFromAI = (cartData: any) => {
-    if (!cartData || !cartData.items || !Array.isArray(cartData.items)) {
+    // ✅ Xử lý trường hợp cart rỗng (items = [])
+    if (!cartData) {
       return; // Không có cart data, bỏ qua
     }
+    
+    // ✅ QUAN TRỌNG: Nếu items là array rỗng [], vẫn phải sync để clear cart
+    if (!Array.isArray(cartData.items)) {
+      // Nếu items không phải array, nhưng có total = 0 → có thể là cart rỗng
+      if (cartData.total === 0 || cartData.total === undefined) {
+        console.log('✅ Cart data có total = 0, clear cart trong localStorage');
+        cartData.items = [];
+      } else {
+        return; // Không có items hợp lệ, bỏ qua
+      }
+    }
 
-    // ✅ Lấy cart hiện tại từ localStorage (bao gồm các món được thêm bằng tay)
+    // ✅ Lấy cart hiện tại từ localStorage để so sánh
     let currentCartItems: any[] = [];
     try {
       currentCartItems = JSON.parse(localStorage.getItem('cartItems') || '[]');
@@ -1013,10 +1051,9 @@ const ChatBox: React.FC = () => {
       currentCartItems = [];
     }
 
-    // ✅ Merge: Cập nhật/cập nhật các món từ AI, giữ lại các món khác
-    const aiItemsMap = new Map<string, any>();
+    // ✅ Transform cart data từ AI format → localStorage format
+    const newCartItems: any[] = [];
     
-    // Transform cart data từ AI format → localStorage format
     cartData.items.forEach((item: any) => {
       const productId = item.productId || item.id;
       if (!productId) return;
@@ -1062,7 +1099,7 @@ const ChatBox: React.FC = () => {
       }
       
       // Format phải match với CartPage.tsx interface CartItem
-      aiItemsMap.set(productId, {
+      newCartItems.push({
         product: {
           _id: productId,
           id: productId,
@@ -1074,40 +1111,12 @@ const ChatBox: React.FC = () => {
       });
     });
 
-    // ✅ Merge: Giữ lại các món không có trong AI response (được thêm bằng tay)
-    const mergedCartItems: any[] = [];
-    const processedProductIds = new Set<string>();
-    
-    // 1. Thêm/cập nhật các món từ AI
-    aiItemsMap.forEach((aiItem, productId) => {
-      const existingIndex = currentCartItems.findIndex((item: any) => 
-        (item.product?._id === productId) || (item.product?.id === productId)
-      );
-      
-      if (existingIndex >= 0) {
-        // Cập nhật món đã có (có thể từ AI hoặc từ tay)
-        mergedCartItems.push(aiItem);
-      } else {
-        // Thêm món mới từ AI
-        mergedCartItems.push(aiItem);
-      }
-      processedProductIds.add(productId);
-    });
-    
-    // 2. Giữ lại các món không có trong AI response (được thêm bằng tay)
-    currentCartItems.forEach((item: any) => {
-      const productId = item.product?._id || item.product?.id;
-      if (productId && !processedProductIds.has(productId)) {
-        // Món này không có trong AI response → giữ lại (được thêm bằng tay)
-        mergedCartItems.push(item);
-      }
-    });
-
-    // ✅ Lưu cart đã merge vào localStorage
-    localStorage.setItem('cartItems', JSON.stringify(mergedCartItems));
+    // ✅ REPLACE hoàn toàn cart từ AI (không merge) để đồng bộ với database
+    // Điều này đảm bảo khi AI xóa món, frontend cũng xóa món đó
+    localStorage.setItem('cartItems', JSON.stringify(newCartItems));
     
     // Cập nhật cart count
-    const count = mergedCartItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
+    const count = newCartItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
     localStorage.setItem('cartCount', String(count));
     
     // Dispatch event để các component khác (CartPage, Header, etc.) biết cart đã thay đổi
@@ -1115,17 +1124,22 @@ const ChatBox: React.FC = () => {
     
     // ✅ Sync cart lên server
     import('../utils/cartSync').then(({ syncCartToServer }) => {
-      syncCartToServer(mergedCartItems);
+      syncCartToServer(newCartItems);
     }).catch((error) => {
       console.error('Failed to sync cart:', error);
     });
     
-    console.log('✅ Đã merge giỏ hàng từ AI với cart hiện tại:', {
+    console.log('✅ Đã REPLACE giỏ hàng từ AI (đồng bộ với database):', {
       aiItems: cartData.items.length,
-      currentItems: currentCartItems.length,
-      mergedItems: mergedCartItems.length
+      previousItems: currentCartItems.length,
+      newItems: newCartItems.length,
+      total: cartData.total || 0
     });
-    message.success('Đã cập nhật giỏ hàng!', 1.5);
+    
+    // Chỉ hiển thị message khi có thay đổi
+    if (newCartItems.length !== currentCartItems.length) {
+      message.success('Đã cập nhật giỏ hàng!', 1.5);
+    }
   };
 
   const handleAddToCart = (product: Product) => {

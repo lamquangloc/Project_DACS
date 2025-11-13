@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FaShoppingCart, FaInfoCircle, FaComments, FaTimes, FaReceipt, FaCalendarAlt, FaUser, FaUserEdit } from 'react-icons/fa';
+import { FaShoppingCart, FaInfoCircle, FaComments, FaTimes, FaReceipt, FaCalendarAlt, FaUser, FaUserEdit, FaPhone, FaMapMarkerAlt, FaStickyNote } from 'react-icons/fa';
 import { useNavigate, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
@@ -169,6 +169,15 @@ const ChatBox: React.FC = () => {
   
   // ✅ Cache products data để tạo product cards
   const [productsCache, setProductsCache] = useState<Map<string, { 
+    id: string; 
+    name: string; 
+    image?: string; 
+    price?: number;
+    slug?: string;
+  }>>(new Map());
+  
+  // ✅ Cache combos data để tạo combo cards
+  const [combosCache, setCombosCache] = useState<Map<string, { 
     id: string; 
     name: string; 
     image?: string; 
@@ -376,6 +385,93 @@ const ChatBox: React.FC = () => {
     fetchAllProducts();
   }, []);
 
+  // ✅ Fetch TẤT CẢ combos để cache data cho combo cards
+  useEffect(() => {
+    const fetchAllCombos = async () => {
+      try {
+        let allCombos: any[] = [];
+        let page = 1;
+        let hasMore = true;
+        const limit = 100;
+        
+        while (hasMore) {
+          try {
+            const response = await fetch(`${API_URL}/api/combos?page=${page}&limit=${limit}`);
+            const data = await response.json();
+            
+            const combos = data.data?.items || 
+                          data.data?.combos || 
+                          data.combos || 
+                          data.data || [];
+            
+            if (combos.length === 0) {
+              hasMore = false;
+              break;
+            }
+            
+            allCombos = [...allCombos, ...combos];
+            
+            const totalPages = data.data?.totalPages || data.totalPages || 1;
+            const currentPage = data.data?.currentPage || data.current || page;
+            
+            if (currentPage >= totalPages || combos.length < limit) {
+              hasMore = false;
+            } else {
+              page++;
+            }
+          } catch (pageError) {
+            console.error(`Error fetching combo page ${page}:`, pageError);
+            hasMore = false;
+          }
+        }
+        
+        console.log(`📦 Fetched ALL combos: ${allCombos.length} total`);
+        
+        const cache = new Map<string, { id: string; name: string; image?: string; price?: number; slug?: string }>();
+        
+        allCombos.forEach((combo: any) => {
+          if (combo.name && (combo.id || combo._id)) {
+            const normalizedName = normalizeText(combo.name);
+            const originalName = combo.name.toLowerCase().trim();
+            
+            let imagePath = combo.image || 
+                          combo.imagePath || 
+                          combo.thumbnail || 
+                          combo.images?.[0] ||
+                          null;
+            
+            const comboData = {
+              id: combo.id || combo._id,
+              name: combo.name,
+              image: imagePath,
+              price: combo.price ? Number(combo.price) : undefined,
+              slug: `${removeVietnameseTones(combo.name)}-${combo.id || combo._id}`
+            };
+            
+            cache.set(normalizedName, comboData);
+            cache.set(originalName, comboData);
+            
+            const nameWithoutTones = removeVietnameseTones(combo.name).toLowerCase();
+            if (nameWithoutTones !== normalizedName) {
+              cache.set(nameWithoutTones, comboData);
+            }
+            
+            // Store với từ "combo" + tên (ví dụ: "combo cặp đôi")
+            const comboKey = `combo ${normalizedName}`;
+            cache.set(comboKey, comboData);
+          }
+        });
+        
+        setCombosCache(cache);
+        console.log(`✅ Combos cached: ${cache.size} entries from ${allCombos.length} combos`);
+      } catch (error) {
+        console.error('Failed to fetch combos:', error);
+      }
+    };
+    
+    fetchAllCombos();
+  }, []);
+
   // ✅ Helper: Extract product name và price từ text
   // Ví dụ: "Canh Cua Cà Pháo - 110.000đ" → { name: "Canh Cua Cà Pháo", price: "110.000đ" }
   const extractProductInfo = (text: string): { name: string; price?: string } | null => {
@@ -422,6 +518,43 @@ const ChatBox: React.FC = () => {
           name,
           price: priceStr.includes('₫') || priceStr.includes('đ') ? priceStr : `${priceStr}₫`
         };
+      }
+    }
+    
+    return null;
+  };
+
+  // ✅ Helper: Tìm combo trong cache với fuzzy matching
+  const findComboInCache = (comboName: string): { id: string; name: string; image?: string; price?: number; slug?: string } | null => {
+    if (!comboName || comboName.trim().length < 2) return null;
+    
+    const normalizedSearch = normalizeText(comboName);
+    const lowerSearch = comboName.toLowerCase().trim();
+    const searchWithoutTones = removeVietnameseTones(comboName).toLowerCase();
+    
+    // Tìm exact match
+    if (combosCache.has(normalizedSearch)) {
+      return combosCache.get(normalizedSearch)!;
+    }
+    
+    if (combosCache.has(lowerSearch)) {
+      return combosCache.get(lowerSearch)!;
+    }
+    
+    if (combosCache.has(searchWithoutTones)) {
+      return combosCache.get(searchWithoutTones)!;
+    }
+    
+    // Tìm với "combo" prefix
+    const comboKey = `combo ${normalizedSearch}`;
+    if (combosCache.has(comboKey)) {
+      return combosCache.get(comboKey)!;
+    }
+    
+    // Fuzzy match: tìm combo có tên chứa search text
+    for (const [key, combo] of combosCache.entries()) {
+      if (key.includes(normalizedSearch) || normalizedSearch.includes(key)) {
+        return combo;
       }
     }
     
@@ -520,6 +653,49 @@ const ChatBox: React.FC = () => {
     return '';
   };
 
+  // ✅ Helper: Kiểm tra xem có phải order info card không (Số điện thoại, Địa chỉ, Ghi chú)
+  const getOrderInfoCardInfo = (text: string): { type: string; icon: React.ReactNode; label: string; value: string; iconColor: string } | null => {
+    const cleanText = text.trim();
+    
+    // Pattern: "Số điện thoại: 0123456789" hoặc "Số điện thoại:0123456789"
+    const phoneMatch = cleanText.match(/^số\s*điện\s*thoại\s*:?\s*(.+)$/i);
+    if (phoneMatch) {
+      return {
+        type: 'phone',
+        icon: <FaPhone />,
+        label: 'Số điện thoại:',
+        value: phoneMatch[1].trim(),
+        iconColor: '#1976d2' // Blue
+      };
+    }
+    
+    // Pattern: "Địa chỉ: ..." hoặc "Địa chỉ:..."
+    const addressMatch = cleanText.match(/^địa\s*chỉ\s*:?\s*(.+)$/i);
+    if (addressMatch) {
+      return {
+        type: 'address',
+        icon: <FaMapMarkerAlt />,
+        label: 'Địa chỉ:',
+        value: addressMatch[1].trim(),
+        iconColor: '#d32f2f' // Red
+      };
+    }
+    
+    // Pattern: "Ghi chú: ..." hoặc "Ghi chú:..." hoặc "Note: ..."
+    const noteMatch = cleanText.match(/^(ghi\s*chú|note)\s*:?\s*(.+)$/i);
+    if (noteMatch) {
+      return {
+        type: 'note',
+        icon: <FaStickyNote />,
+        label: 'Ghi chú:',
+        value: noteMatch[2].trim(),
+        iconColor: '#ffc107' // Yellow
+      };
+    }
+    
+    return null;
+  };
+
   // ✅ Helper: Kiểm tra xem có phải action card không
   const getActionCardInfo = (text: string): { type: string; icon: React.ReactNode; link: string } | null => {
     const lowerText = text.toLowerCase().trim();
@@ -569,6 +745,27 @@ const ChatBox: React.FC = () => {
       // Extract text từ children (có thể là React elements phức tạp)
       const childText = extractTextFromChildren(children);
       
+      // ✅ Kiểm tra xem có phải order info card không (ưu tiên cao nhất)
+      const orderInfoCardInfo = getOrderInfoCardInfo(childText);
+      if (orderInfoCardInfo) {
+        return (
+          <li className="order-info-card-list-item" {...props}>
+            <div className="order-info-card-inline">
+              <div 
+                className="order-info-card-icon-wrapper"
+                style={{ background: `linear-gradient(135deg, ${orderInfoCardInfo.iconColor} 0%, ${orderInfoCardInfo.iconColor}dd 100%)` }}
+              >
+                {orderInfoCardInfo.icon}
+              </div>
+              <div className="order-info-card-content">
+                <span className="order-info-card-label">{orderInfoCardInfo.label}</span>
+                <span className="order-info-card-value">{orderInfoCardInfo.value}</span>
+              </div>
+            </div>
+          </li>
+        );
+      }
+      
       // ✅ Kiểm tra xem có phải action card không (ưu tiên cao hơn product)
       const actionCardInfo = getActionCardInfo(childText);
       if (actionCardInfo) {
@@ -588,6 +785,100 @@ const ChatBox: React.FC = () => {
                 </div>
               </div>
             </Link>
+          </li>
+        );
+      }
+      
+      // ✅ Kiểm tra xem có phải combo không (ưu tiên trước product)
+      const cleanTextForCombo = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const lowerTextForCombo = cleanTextForCombo.toLowerCase();
+      
+      // Detect combo: có từ "combo" hoặc pattern "Combo ... - giá"
+      const isCombo = lowerTextForCombo.includes('combo') || 
+                     lowerTextForCombo.startsWith('combo');
+      
+      let shouldRenderAsCombo = false;
+      let comboName = '';
+      let comboDisplayPrice = '';
+      let combo: { id: string; name: string; image?: string; price?: number; slug?: string } | null = null;
+      
+      if (isCombo) {
+        // Extract combo info tương tự product
+        const comboInfo = extractProductInfo(childText);
+        if (comboInfo) {
+          comboName = comboInfo.name;
+          comboDisplayPrice = comboInfo.price || '';
+        } else {
+          comboName = cleanTextForCombo.replace(/^combo\s*/i, '').trim();
+        }
+        
+        // Tìm combo trong cache
+        combo = findComboInCache(comboName);
+        if (combo) {
+          shouldRenderAsCombo = true;
+          comboName = combo.name;
+          if (!comboDisplayPrice && combo.price) {
+            comboDisplayPrice = `${combo.price.toLocaleString('vi-VN')}₫`;
+          }
+        } else if (comboName.length > 2) {
+          // Vẫn render nếu có vẻ như tên combo
+          shouldRenderAsCombo = true;
+        }
+      }
+      
+      // ✅ Render combo card nếu detect được combo
+      if (shouldRenderAsCombo) {
+        const finalComboName = combo?.name || comboName;
+        const comboSlug = combo?.slug || `${removeVietnameseTones(comboName)}-${combo?.id || 'unknown'}`;
+        const comboImageUrl = combo?.image ? getImageUrl(combo.image) : null;
+        
+        const comboCardContent = (
+          <div className="product-card-inline">
+            <div className="product-card-image-wrapper">
+              {comboImageUrl ? (
+                <img 
+                  src={comboImageUrl} 
+                  alt={finalComboName}
+                  className="product-card-image"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                  loading="lazy"
+                />
+              ) : (
+                <div className="product-card-placeholder">
+                  <span style={{ fontSize: '32px', opacity: 0.3 }}>🍽️</span>
+                </div>
+              )}
+            </div>
+            <div className="product-card-content">
+              <span className="product-card-name">
+                {finalComboName}
+              </span>
+              {comboDisplayPrice && (
+                <span className="product-card-price">{comboDisplayPrice}</span>
+              )}
+            </div>
+          </div>
+        );
+        
+        if (combo?.id) {
+          return (
+            <li className="product-list-item" {...props}>
+              <Link 
+                to={`/combo/${comboSlug}`}
+                className="product-card-link-wrapper"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {comboCardContent}
+              </Link>
+            </li>
+          );
+        }
+        
+        return (
+          <li className="product-list-item" {...props}>
+            {comboCardContent}
           </li>
         );
       }
@@ -881,17 +1172,23 @@ const ChatBox: React.FC = () => {
       const transformedCart = {
         items: cartItems.map((item: any) => {
           const product = item.product || {};
+          const combo = item.combo || {};
+          const isCombo = !!item.combo;
+          const itemData = isCombo ? combo : product;
+          
           return {
-            productId: product._id || product.id,
-            name: product.name || 'Sản phẩm',
-            price: product.price || 0,
+            ...(isCombo ? { comboId: combo._id || combo.id } : { productId: product._id || product.id }),
+            name: itemData.name || (isCombo ? 'Combo' : 'Sản phẩm'),
+            price: itemData.price || 0,
             quantity: item.quantity || 1,
-            image: product.image || ''
+            image: itemData.image || ''
           };
         }),
         total: cartItems.reduce((sum: number, item: any) => {
           const product = item.product || {};
-          return sum + (product.price || 0) * (item.quantity || 1);
+          const combo = item.combo || {};
+          const itemData = item.combo ? combo : product;
+          return sum + (itemData.price || 0) * (item.quantity || 1);
         }, 0)
       };
       
@@ -991,15 +1288,23 @@ const ChatBox: React.FC = () => {
       } else if (data.context?.cart) {
         syncCartFromAI(data.context.cart);
       } else {
-        // ✅ Nếu không có cart data nhưng reply có từ khóa "xóa toàn bộ" hoặc "clear cart"
+        // ✅ Nếu không có cart data nhưng reply có từ khóa đặt hàng thành công
         // → Clear cart trong localStorage để đồng bộ với database
         const replyLower = reply.toLowerCase();
-        if (replyLower.includes('xóa toàn bộ') || 
-            replyLower.includes('xóa hết giỏ hàng') || 
-            replyLower.includes('làm trống giỏ hàng') ||
-            replyLower.includes('clear cart') ||
-            replyLower.includes('đã xóa toàn bộ')) {
-          console.log('✅ Phát hiện từ khóa xóa toàn bộ trong reply, clear cart trong localStorage');
+        const isOrderSuccess = replyLower.includes('đặt thành công') || 
+                               replyLower.includes('đã đặt thành công') ||
+                               replyLower.includes('mã đơn') ||
+                               replyLower.includes('order code') ||
+                               replyLower.includes('giỏ hàng đã được làm trống') ||
+                               replyLower.includes('đã được làm trống');
+        const isClearCart = replyLower.includes('xóa toàn bộ') || 
+                            replyLower.includes('xóa hết giỏ hàng') || 
+                            replyLower.includes('làm trống giỏ hàng') ||
+                            replyLower.includes('clear cart') ||
+                            replyLower.includes('đã xóa toàn bộ');
+        
+        if (isOrderSuccess || isClearCart) {
+          console.log('✅ Phát hiện từ khóa đặt hàng thành công/xóa giỏ hàng trong reply, clear cart trong localStorage');
           syncCartFromAI({ items: [], total: 0 });
         }
       }
@@ -1055,36 +1360,68 @@ const ChatBox: React.FC = () => {
     const newCartItems: any[] = [];
     
     cartData.items.forEach((item: any) => {
-      const productId = item.productId || item.id;
-      if (!productId) return;
+      const productId = item.productId;
+      const comboId = item.comboId;
+      
+      // Phải có ít nhất productId hoặc comboId
+      if (!productId && !comboId) return;
+      
+      const isCombo = !!comboId;
+      const itemId = comboId || productId;
       
       let image = item.image || '';
       
-      // ✅ Nếu không có image từ AI, thử lấy từ productsCache
-      if (!image && productId) {
-        for (const cachedProduct of productsCache.values()) {
-          if (cachedProduct.id === productId) {
-            image = cachedProduct.image || '';
-            break;
+      // ✅ Nếu không có image từ AI, thử lấy từ cache
+      if (!image && itemId) {
+        if (isCombo) {
+          // Tìm trong combosCache
+          for (const cachedCombo of combosCache.values()) {
+            if (cachedCombo.id === itemId) {
+              image = cachedCombo.image || '';
+              break;
+            }
+          }
+        } else {
+          // Tìm trong productsCache
+          for (const cachedProduct of productsCache.values()) {
+            if (cachedProduct.id === itemId) {
+              image = cachedProduct.image || '';
+              break;
+            }
           }
         }
       }
       
       // ✅ Nếu vẫn không có image, fetch từ API (async)
-      if (!image && productId) {
-        fetch(`${API_URL}/api/products/${productId}`)
+      if (!image && itemId) {
+        const apiEndpoint = isCombo ? `${API_URL}/api/combos/${itemId}` : `${API_URL}/api/products/${itemId}`;
+        fetch(apiEndpoint)
           .then(res => res.json())
           .then(data => {
-            const productDetail = data.data || data;
-            if (productDetail?.image) {
+            const itemDetail = data.data || data;
+            if (itemDetail?.image) {
               // Cập nhật cart item với image mới
               try {
                 const cartItems = JSON.parse(localStorage.getItem('cartItems') || '[]');
-                const itemIndex = cartItems.findIndex((cartItem: any) => 
-                  (cartItem.product?._id === productId) || (cartItem.product?.id === productId)
-                );
+                const itemIndex = cartItems.findIndex((cartItem: any) => {
+                  if (isCombo) {
+                    return (cartItem.combo?._id === itemId) || (cartItem.combo?.id === itemId);
+                  } else {
+                    return (cartItem.product?._id === itemId) || (cartItem.product?.id === itemId);
+                  }
+                });
                 if (itemIndex >= 0) {
-                  cartItems[itemIndex].product.image = productDetail.image;
+                  if (isCombo) {
+                    if (!cartItems[itemIndex].combo) {
+                      cartItems[itemIndex].combo = {};
+                    }
+                    cartItems[itemIndex].combo.image = itemDetail.image;
+                  } else {
+                    if (!cartItems[itemIndex].product) {
+                      cartItems[itemIndex].product = {};
+                    }
+                    cartItems[itemIndex].product.image = itemDetail.image;
+                  }
                   localStorage.setItem('cartItems', JSON.stringify(cartItems));
                   window.dispatchEvent(new Event('storage'));
                 }
@@ -1099,16 +1436,30 @@ const ChatBox: React.FC = () => {
       }
       
       // Format phải match với CartPage.tsx interface CartItem
-      newCartItems.push({
-        product: {
-          _id: productId,
-          id: productId,
-          name: item.name || 'Sản phẩm',
-          price: item.price || 0,
-          image: image, // Image từ AI hoặc cache
-        },
-        quantity: item.quantity || 1,
-      });
+      // CartPage hỗ trợ cả product và combo
+      if (isCombo) {
+        newCartItems.push({
+          combo: {
+            _id: comboId,
+            id: comboId,
+            name: item.name || 'Combo',
+            price: item.price || 0,
+            image: image, // Image từ AI hoặc cache
+          },
+          quantity: item.quantity || 1,
+        });
+      } else {
+        newCartItems.push({
+          product: {
+            _id: productId,
+            id: productId,
+            name: item.name || 'Sản phẩm',
+            price: item.price || 0,
+            image: image, // Image từ AI hoặc cache
+          },
+          quantity: item.quantity || 1,
+        });
+      }
     });
 
     // ✅ REPLACE hoàn toàn cart từ AI (không merge) để đồng bộ với database

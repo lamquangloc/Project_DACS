@@ -524,6 +524,75 @@ const ChatBox: React.FC = () => {
     return null;
   };
 
+  // ✅ Helper: Extract combo info từ text dài (ví dụ: "Nhà hàng có Combo cặp đôi với mô tả..., giá 650.000₫")
+  const extractComboInfo = (text: string): { name: string; price?: string } | null => {
+    if (!text || typeof text !== 'string') return null;
+    
+    const cleanText = text.replace(/\*\*/g, '').replace(/`/g, '').trim();
+    const lowerText = cleanText.toLowerCase();
+    
+    // Chỉ xử lý nếu có từ "combo"
+    if (!lowerText.includes('combo')) return null;
+    
+    // Pattern 1: "Combo [tên]" - extract tên combo (cải thiện regex)
+    // Ví dụ: "Combo cặp đôi" hoặc "Nhà hàng có Combo cặp đôi với mô tả..."
+    // Match: "combo" + tên (có thể có dấu cách, không có dấu phẩy, dấu chấm, hoặc từ "với", "mô tả", "giá")
+    const comboNameMatch = cleanText.match(/(?:^|\s)(?:combo\s+)([^,\-\.\n]+?)(?:\s+với|\s+mô\s+tả|\s+là\s+combo|\s+giá|,|\.|$)/i);
+    if (comboNameMatch) {
+      let comboName = comboNameMatch[1].trim();
+      // Loại bỏ các từ thừa ở cuối
+      comboName = comboName.replace(/\s+(với|mô\s+tả|là|giá).*$/i, '').trim();
+      
+      // Extract giá từ text (tìm "giá" + số)
+      let price: string | undefined;
+      const priceMatch = cleanText.match(/giá\s+([\d.,\s]+[₫đ]?)/i);
+      if (priceMatch) {
+        price = priceMatch[1].trim();
+        if (!price.includes('₫') && !price.includes('đ')) {
+          price = `${price}₫`;
+        }
+      }
+      
+      if (comboName.length > 2) {
+        return { name: comboName, price };
+      }
+    }
+    
+    // Pattern 2: "Combo [tên] - giá" (format giống product)
+    const comboWithPrice = extractProductInfo(cleanText);
+    if (comboWithPrice && lowerText.includes('combo')) {
+      return comboWithPrice;
+    }
+    
+    // Pattern 3: Tìm "Combo" và extract text sau đó (fallback cải thiện)
+    const comboIndex = lowerText.indexOf('combo');
+    if (comboIndex >= 0) {
+      const afterCombo = cleanText.substring(comboIndex + 5).trim();
+      // Lấy từ đầu đến dấu phẩy, dấu chấm, hoặc từ "với", "mô tả", "là combo"
+      const nameMatch = afterCombo.match(/^([^,\-\.\n]+?)(?:\s+với|\s+mô\s+tả|\s+là\s+combo|\s+giá|,|\.|$)/);
+      if (nameMatch) {
+        let comboName = nameMatch[1].trim();
+        // Loại bỏ các từ thừa
+        comboName = comboName.replace(/\s+(với|mô\s+tả|là|giá).*$/i, '').trim();
+        
+        if (comboName.length > 2) {
+          // Extract giá nếu có
+          let price: string | undefined;
+          const priceMatch = cleanText.match(/giá\s+([\d.,\s]+[₫đ]?)/i);
+          if (priceMatch) {
+            price = priceMatch[1].trim();
+            if (!price.includes('₫') && !price.includes('đ')) {
+              price = `${price}₫`;
+            }
+          }
+          return { name: comboName, price };
+        }
+      }
+    }
+    
+    return null;
+  };
+
   // ✅ Helper: Tìm combo trong cache với fuzzy matching
   const findComboInCache = (comboName: string): { id: string; name: string; image?: string; price?: number; slug?: string } | null => {
     if (!comboName || comboName.trim().length < 2) return null;
@@ -700,6 +769,14 @@ const ChatBox: React.FC = () => {
   const getActionCardInfo = (text: string): { type: string; icon: React.ReactNode; link: string } | null => {
     const lowerText = text.toLowerCase().trim();
     
+    // ✅ Loại bỏ các text không phải action card (câu hỏi về combo)
+    // Không detect action card nếu text là câu hỏi về combo
+    if ((lowerText.includes('bạn có muốn') || lowerText.includes('bạn muốn')) && 
+        (lowerText.includes('thêm') || lowerText.includes('combo')) &&
+        (lowerText.includes('giỏ hàng') || lowerText.includes('vào giỏ'))) {
+      return null; // Không phải action card, chỉ là câu hỏi
+    }
+    
     // Xem đơn hàng
     if (lowerText.includes('xem đơn hàng') || lowerText.includes('đơn hàng của bạn')) {
       return {
@@ -739,8 +816,188 @@ const ChatBox: React.FC = () => {
     return null;
   };
 
+  // ✅ Helper: Extract combo info và vị trí từ text
+  const extractComboInfoWithPosition = (text: string): { 
+    comboInfo: { name: string; price?: string } | null;
+    startIndex: number;
+    endIndex: number;
+    beforeText: string;
+    afterText: string;
+  } | null => {
+    const cleanText = text.replace(/\*\*/g, '').replace(/`/g, '').trim();
+    const lowerText = cleanText.toLowerCase();
+    
+    if (!lowerText.includes('combo')) return null;
+    
+    // Tìm vị trí của "combo" trong text
+    const comboIndex = lowerText.indexOf('combo');
+    if (comboIndex < 0) return null;
+    
+    // Extract combo info
+    const comboInfo = extractComboInfo(cleanText);
+    if (!comboInfo) return null;
+    
+    // Tìm vị trí bắt đầu và kết thúc của phần combo trong text
+    // Pattern: "Combo [tên]" hoặc "Combo [tên] với..." hoặc "Combo [tên], giá..."
+    const comboPattern = new RegExp(`(?:^|\\s)(?:combo\\s+)([^,\\-\\n]+?)(?:\\s+với|\\s+mô\\s+tả|\\s+là\\s+combo|\\s+giá|,|\\.|$)`, 'i');
+    const match = cleanText.substring(comboIndex).match(comboPattern);
+    
+    if (match) {
+      const matchStart = comboIndex + match.index!;
+      const matchEnd = matchStart + match[0].length;
+      
+      // Tìm giá nếu có (có thể ở sau phần combo)
+      let priceEnd = matchEnd;
+      const priceMatch = cleanText.substring(matchEnd).match(/giá\s+([\d.,\s]+[₫đ]?)/i);
+      if (priceMatch) {
+        priceEnd = matchEnd + priceMatch.index! + priceMatch[0].length;
+      }
+      
+      const beforeText = cleanText.substring(0, matchStart).trim();
+      let afterText = cleanText.substring(priceEnd).trim();
+      
+      // ✅ Loại bỏ phần câu hỏi về combo trong afterText (như "Bạn có muốn thêm nào vào giỏ hàng không?")
+      const lowerAfterText = afterText.toLowerCase();
+      if (lowerAfterText.includes('bạn có muốn') || 
+          lowerAfterText.includes('bạn muốn') ||
+          (lowerAfterText.includes('thêm') && lowerAfterText.includes('giỏ hàng'))) {
+        // Bỏ toàn bộ phần câu hỏi
+        afterText = '';
+      }
+      
+      return {
+        comboInfo,
+        startIndex: matchStart,
+        endIndex: priceEnd,
+        beforeText,
+        afterText
+      };
+    }
+    
+    return null;
+  };
+
+  // ✅ Helper: Render combo card từ combo info
+  const renderComboCardFromInfo = (comboInfo: { name: string; price?: string }): React.ReactNode | null => {
+    let comboName = comboInfo.name;
+    let comboDisplayPrice = comboInfo.price || '';
+    let combo: { id: string; name: string; image?: string; price?: number; slug?: string } | null = null;
+    
+    // Tìm combo trong cache
+    if (comboName) {
+      combo = findComboInCache(comboName);
+      if (!combo && !comboName.toLowerCase().startsWith('combo')) {
+        combo = findComboInCache(`combo ${comboName}`);
+      }
+    }
+    
+    if (!combo && (!comboName || comboName.length < 2)) {
+      return null;
+    }
+    
+    const finalComboName = combo?.name || comboName;
+    const comboSlug = combo?.slug || `${removeVietnameseTones(comboName)}-${combo?.id || 'unknown'}`;
+    const comboImageUrl = combo?.image ? getImageUrl(combo.image) : null;
+    
+    if (!comboDisplayPrice && combo?.price) {
+      comboDisplayPrice = `${combo.price.toLocaleString('vi-VN')}₫`;
+    }
+    
+    const comboCardContent = (
+      <div className="product-card-inline">
+        <div className="product-card-image-wrapper">
+          {comboImageUrl ? (
+            <img 
+              src={comboImageUrl} 
+              alt={finalComboName}
+              className="product-card-image"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+              loading="lazy"
+            />
+          ) : (
+            <div className="product-card-placeholder">
+              <span style={{ fontSize: '32px', opacity: 0.3 }}>🍽️</span>
+            </div>
+          )}
+        </div>
+        <div className="product-card-content">
+          <span className="product-card-name">
+            {finalComboName}
+          </span>
+          {comboDisplayPrice && (
+            <span className="product-card-price">{comboDisplayPrice}</span>
+          )}
+        </div>
+      </div>
+    );
+    
+    if (combo?.id) {
+      return (
+        <Link 
+          to={`/combo/${comboSlug}`}
+          className="product-card-link-wrapper"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {comboCardContent}
+        </Link>
+      );
+    }
+    
+    return comboCardContent;
+  };
+
   // ✅ Custom markdown components để render product cards và action cards
   const markdownComponents: Components = {
+    p: ({ children, ...props }) => {
+      // Extract text từ children
+      const childText = extractTextFromChildren(children);
+      
+      // ✅ Ẩn các paragraph chỉ chứa câu hỏi về combo (như "Bạn có muốn thêm nào vào giỏ hàng không?")
+      const cleanChildText = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const lowerChildText = cleanChildText.toLowerCase();
+      // Detect cả trường hợp text bị tách (như "nào vào giỏ hàng không?" hoặc "Bạn có muốn thêm")
+      const isComboQuestionOnly = (
+        (lowerChildText.includes('bạn có muốn') || lowerChildText.includes('bạn muốn')) && 
+        (lowerChildText.includes('thêm') || lowerChildText.includes('combo') || lowerChildText.includes('vào giỏ') || lowerChildText.includes('giỏ hàng'))
+      ) || (
+        (lowerChildText.includes('nào vào giỏ hàng') || lowerChildText.includes('vào giỏ hàng không')) &&
+        !lowerChildText.match(/combo\s+\w+/) // Không ẩn nếu có tên combo cụ thể
+      );
+      if (isComboQuestionOnly) {
+        return null; // Không render paragraph này
+      }
+      
+      // ✅ Loại bỏ "Tổng cộng" khỏi combo card detection
+      const cleanChildTextForTotal = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const lowerChildTextForTotal = cleanChildTextForTotal.toLowerCase();
+      const isTotalLine = lowerChildTextForTotal.includes('tổng cộng') || 
+                         lowerChildTextForTotal.includes('tổng:') ||
+                         (lowerChildTextForTotal.startsWith('tổng') && lowerChildTextForTotal.includes('₫'));
+      if (isTotalLine) {
+        // Render như text thông thường, không phải combo card
+        return <p {...props}>{children}</p>;
+      }
+      
+      // ✅ Kiểm tra xem có combo không trong paragraph
+      const comboExtract = extractComboInfoWithPosition(childText);
+      if (comboExtract && comboExtract.comboInfo) {
+        const comboCard = renderComboCardFromInfo(comboExtract.comboInfo);
+        if (comboCard) {
+          // ✅ Chỉ hiển thị beforeText và comboCard, bỏ phần afterText (đã được loại bỏ câu hỏi)
+          return (
+            <p {...props} style={{ margin: '8px 0' }}>
+              {comboExtract.beforeText && <span>{comboExtract.beforeText} </span>}
+              {comboCard}
+            </p>
+          );
+        }
+      }
+      
+      // Render bình thường
+      return <p {...props}>{children}</p>;
+    },
     li: ({ children, ...props }) => {
       // Extract text từ children (có thể là React elements phức tạp)
       const childText = extractTextFromChildren(children);
@@ -766,6 +1023,22 @@ const ChatBox: React.FC = () => {
         );
       }
       
+      // ✅ Ẩn các list item chỉ chứa câu hỏi về combo (như "Bạn có muốn thêm nào vào giỏ hàng không?")
+      // Phải kiểm tra TRƯỚC action card để tránh render nhầm
+      const cleanChildText = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const lowerChildText = cleanChildText.toLowerCase();
+      // Detect cả trường hợp text bị tách (như "nào vào giỏ hàng không?" hoặc "Bạn có muốn thêm")
+      const isComboQuestionOnly = (
+        (lowerChildText.includes('bạn có muốn') || lowerChildText.includes('bạn muốn')) && 
+        (lowerChildText.includes('thêm') || lowerChildText.includes('combo') || lowerChildText.includes('vào giỏ') || lowerChildText.includes('giỏ hàng'))
+      ) || (
+        (lowerChildText.includes('nào vào giỏ hàng') || lowerChildText.includes('vào giỏ hàng không')) &&
+        !lowerChildText.match(/combo\s+\w+/) // Không ẩn nếu có tên combo cụ thể
+      );
+      if (isComboQuestionOnly) {
+        return null; // Không render list item này
+      }
+      
       // ✅ Kiểm tra xem có phải action card không (ưu tiên cao hơn product)
       const actionCardInfo = getActionCardInfo(childText);
       if (actionCardInfo) {
@@ -789,99 +1062,86 @@ const ChatBox: React.FC = () => {
         );
       }
       
-      // ✅ Kiểm tra xem có phải combo không (ưu tiên trước product)
-      const cleanTextForCombo = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
-      const lowerTextForCombo = cleanTextForCombo.toLowerCase();
-      
-      // Detect combo: có từ "combo" hoặc pattern "Combo ... - giá"
-      const isCombo = lowerTextForCombo.includes('combo') || 
-                     lowerTextForCombo.startsWith('combo');
-      
-      let shouldRenderAsCombo = false;
-      let comboName = '';
-      let comboDisplayPrice = '';
-      let combo: { id: string; name: string; image?: string; price?: number; slug?: string } | null = null;
-      
-      if (isCombo) {
-        // Extract combo info tương tự product
-        const comboInfo = extractProductInfo(childText);
-        if (comboInfo) {
-          comboName = comboInfo.name;
-          comboDisplayPrice = comboInfo.price || '';
-        } else {
-          comboName = cleanTextForCombo.replace(/^combo\s*/i, '').trim();
-        }
-        
-        // Tìm combo trong cache
-        combo = findComboInCache(comboName);
-        if (combo) {
-          shouldRenderAsCombo = true;
-          comboName = combo.name;
-          if (!comboDisplayPrice && combo.price) {
-            comboDisplayPrice = `${combo.price.toLocaleString('vi-VN')}₫`;
+      // ✅ Kiểm tra xem có combo không (ưu tiên trước product)
+      const comboExtract = extractComboInfoWithPosition(childText);
+      if (comboExtract && comboExtract.comboInfo) {
+        const comboCard = renderComboCardFromInfo(comboExtract.comboInfo);
+        if (comboCard) {
+          // Nếu text chỉ chứa combo (không có text trước), render full card
+          if (!comboExtract.beforeText) {
+            return (
+              <li className="product-list-item" {...props}>
+                {comboCard}
+              </li>
+            );
           }
-        } else if (comboName.length > 2) {
-          // Vẫn render nếu có vẻ như tên combo
-          shouldRenderAsCombo = true;
-        }
-      }
-      
-      // ✅ Render combo card nếu detect được combo
-      if (shouldRenderAsCombo) {
-        const finalComboName = combo?.name || comboName;
-        const comboSlug = combo?.slug || `${removeVietnameseTones(comboName)}-${combo?.id || 'unknown'}`;
-        const comboImageUrl = combo?.image ? getImageUrl(combo.image) : null;
-        
-        const comboCardContent = (
-          <div className="product-card-inline">
-            <div className="product-card-image-wrapper">
-              {comboImageUrl ? (
-                <img 
-                  src={comboImageUrl} 
-                  alt={finalComboName}
-                  className="product-card-image"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = 'none';
-                  }}
-                  loading="lazy"
-                />
-              ) : (
-                <div className="product-card-placeholder">
-                  <span style={{ fontSize: '32px', opacity: 0.3 }}>🍽️</span>
-                </div>
-              )}
-            </div>
-            <div className="product-card-content">
-              <span className="product-card-name">
-                {finalComboName}
-              </span>
-              {comboDisplayPrice && (
-                <span className="product-card-price">{comboDisplayPrice}</span>
-              )}
-            </div>
-          </div>
-        );
-        
-        if (combo?.id) {
+          // Nếu có text trước, chỉ render text trước + comboCard, bỏ phần afterText (đã được loại bỏ câu hỏi)
           return (
             <li className="product-list-item" {...props}>
-              <Link 
-                to={`/combo/${comboSlug}`}
-                className="product-card-link-wrapper"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {comboCardContent}
-              </Link>
+              {comboExtract.beforeText && <span>{comboExtract.beforeText} </span>}
+              {comboCard}
             </li>
           );
         }
-        
-        return (
-          <li className="product-list-item" {...props}>
-            {comboCardContent}
-          </li>
-        );
       }
+      
+      // ✅ Ẩn các dòng text trùng lặp với combo/product đã được render như card
+      // Pattern: "1x Combo [tên] - [giá]₫" hoặc "1x [tên] - [giá]₫"
+      // Nếu text này có thể extract được combo/product info, và có pattern số lượng
+      // → Có thể đã được render như card ở trên, kiểm tra xem có render được card không
+      const cleanTextForDuplicate = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const hasQuantityPattern = /^\d+x\s+/i.test(cleanTextForDuplicate);
+      
+      if (hasQuantityPattern) {
+        // Thử extract combo info
+        const comboExtractForDuplicate = extractComboInfoWithPosition(childText);
+        if (comboExtractForDuplicate && comboExtractForDuplicate.comboInfo) {
+          // Nếu có thể render được combo card → đã render như card, không cần render lại như text
+          const comboCardForDuplicate = renderComboCardFromInfo(comboExtractForDuplicate.comboInfo);
+          if (comboCardForDuplicate && !comboExtractForDuplicate.beforeText && !comboExtractForDuplicate.afterText) {
+            // Đã được render như combo card, không cần render lại như text
+            return null;
+          }
+        }
+        
+        // Thử extract product info
+        const productInfoForDuplicate = extractProductInfo(childText);
+        if (productInfoForDuplicate) {
+          // Nếu có pattern "Tên - giá" và có số lượng → có thể đã được render như product card
+          // Kiểm tra xem có render được product card không (dựa trên logic render product)
+          const cleanText = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
+          const lowerText = cleanText.toLowerCase();
+          const isQuestion = lowerText.includes('bạn muốn') || 
+                            lowerText.includes('có thể') ||
+                            (lowerText.includes('không') && lowerText.includes('?'));
+          
+          if (!isQuestion) {
+            // Có thể render như product card, không cần render lại như text
+            // (Logic render product sẽ tự động xử lý ở bước sau)
+            // Nhưng nếu text chỉ là "1x [tên] - [giá]₫" và không có text khác → có thể là trùng lặp
+            const isOnlyProductInfo = /^\d+x\s+.+?\s*-\s*[\d.,\s]+[₫đ]/i.test(cleanText);
+            if (isOnlyProductInfo) {
+              // Để logic render product xử lý, không return null ở đây
+              // Vì có thể là item thực sự cần hiển thị
+            }
+          }
+        }
+      }
+      
+      // ✅ Loại bỏ "Tổng cộng" khỏi product/combo card detection
+      const cleanChildTextForTotal = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const lowerChildTextForTotal = cleanChildTextForTotal.toLowerCase();
+      const isTotalLine = lowerChildTextForTotal.includes('tổng cộng') || 
+                         lowerChildTextForTotal.includes('tổng:') ||
+                         (lowerChildTextForTotal.startsWith('tổng') && lowerChildTextForTotal.includes('₫'));
+      if (isTotalLine) {
+        // Render như text thông thường, không phải product/combo card
+        return <li {...props}>{children}</li>;
+      }
+      
+      // ✅ KHÔNG ẩn các dòng text - hiển thị đầy đủ tất cả các món mà AI trả về
+      // Mỗi dòng có thể là một item riêng biệt trong giỏ hàng (có thể có nhiều item cùng tên)
+      // Logic render combo/product card sẽ tự động xử lý việc hiển thị
       
       // ✅ Kiểm tra xem có phải product không (có pattern "Tên - giá" hoặc chỉ là tên món)
       const productInfo = extractProductInfo(childText);

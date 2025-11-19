@@ -3,7 +3,8 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 export interface CartItem {
-  productId: string;
+  productId?: string;
+  comboId?: string;
   name: string;
   price: number;
   quantity: number;
@@ -128,19 +129,37 @@ class CartService {
     try {
       const currentCart = await this.getCart(userId);
       
-      // Tìm item đã có trong cart
-      const existingItemIndex = currentCart.items.findIndex(
-        (i) => i.productId === item.productId
-      );
+      // ✅ Tìm item đã có trong cart - so sánh cả productId và comboId
+      const existingItemIndex = currentCart.items.findIndex((i) => {
+        // Nếu cả hai đều có productId → so sánh productId
+        if (i.productId && item.productId) {
+          return i.productId === item.productId;
+        }
+        // Nếu cả hai đều có comboId → so sánh comboId
+        if (i.comboId && item.comboId) {
+          return i.comboId === item.comboId;
+        }
+        // Không match
+        return false;
+      });
 
       let updatedItems: CartItem[];
       if (existingItemIndex >= 0) {
         // Tăng quantity nếu đã có
         updatedItems = [...currentCart.items];
         updatedItems[existingItemIndex].quantity += item.quantity;
+        console.log('✅ Item already in cart, increased quantity:', {
+          itemId: item.productId || item.comboId,
+          newQuantity: updatedItems[existingItemIndex].quantity
+        });
       } else {
         // Thêm item mới
         updatedItems = [...currentCart.items, item];
+        console.log('✅ Added new item to cart:', {
+          productId: item.productId || null,
+          comboId: item.comboId || null,
+          name: item.name
+        });
       }
 
       // Tính lại total

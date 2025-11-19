@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Tabs, Button, message, Tag } from 'antd';
 import orderService from '../../services/orderService';
+import comboService from '../../services/comboService';
 import { formatCurrency } from '../../utils/currencyUtils';
 import { formatDate } from '../../utils/dateUtils';
+import { getImageUrl } from '../../utils/image';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import './UserProfilePage.css';
 import ScrollToTopButton from '../../components/ui/ScrollToTopButton';
@@ -36,6 +38,7 @@ const MyOrderPage: React.FC = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [_loading, setLoading] = useState(false);
   const [tab, setTab] = useState('ALL');
+  const [itemDetails, setItemDetails] = useState<Map<string, any>>(new Map());
   const user = JSON.parse(localStorage.getItem('user') || 'null');
   const navigate = useNavigate();
   const location = useLocation();
@@ -44,6 +47,47 @@ const MyOrderPage: React.FC = () => {
     fetchOrders();
     // eslint-disable-next-line
   }, [tab]);
+
+  useEffect(() => {
+    if (orders.length > 0) {
+      fetchAllItemDetails();
+    }
+    // eslint-disable-next-line
+  }, [orders]);
+
+  const fetchAllItemDetails = async () => {
+    const detailsMap = new Map<string, any>();
+    
+    // ✅ Collect TẤT CẢ comboIds (kể cả khi đã có combo object)
+    // Vì combo object từ backend có thể không đầy đủ hoặc image path không đúng
+    const comboIds: string[] = [];
+    orders.forEach((order: any) => {
+      if (order.items) {
+        order.items.forEach((item: any) => {
+          if (item.comboId && !comboIds.includes(item.comboId)) {
+            comboIds.push(item.comboId);
+          }
+        });
+      }
+    });
+    
+    // Fetch combo details
+    for (const comboId of comboIds) {
+      try {
+        const res = await comboService.getById(comboId);
+        // ✅ res là ApiResponse<Combo>, cần lấy res.data để có Combo object
+        const combo = (res as any).data || res;
+        if (combo && combo.name && combo.image) {
+          detailsMap.set(comboId, combo);
+          console.log('✅ Fetched combo details:', comboId, combo.name, combo.image);
+        }
+      } catch (e) {
+        console.error('Error fetching combo:', comboId, e);
+      }
+    }
+    
+    setItemDetails(detailsMap);
+  };
 
   const fetchOrders = async () => {
     if (!user) return;
@@ -118,12 +162,37 @@ const MyOrderPage: React.FC = () => {
               </div>
               <div className="myorder-products">
                 {order.items.map((item: any) => {
-                  const product = item.product || item.combo || {};
+                  // ✅ Ưu tiên lấy từ itemDetails (đã fetch), sau đó từ item.product/combo, cuối cùng là empty object
+                  let product = item.product || item.combo || {};
+                  
+                  // ✅ Nếu có comboId, luôn ưu tiên lấy từ itemDetails (đã fetch đầy đủ)
+                  if (item.comboId) {
+                    const fetchedCombo = itemDetails.get(item.comboId);
+                    if (fetchedCombo && fetchedCombo.name && fetchedCombo.image) {
+                      product = fetchedCombo;
+                    } else if (!product.name || !product.image) {
+                      // Nếu chưa fetch được, vẫn dùng product hiện tại nhưng sẽ fetch sau
+                      console.log('⚠️ Combo not fetched yet:', item.comboId, 'product:', product);
+                    }
+                  }
+                  
+                  // ✅ Sử dụng getImageUrl để format image URL đúng (giống ComboPage)
+                  let imageUrl = '/no-image.png';
+                  if (product.image) {
+                    // Format giống ComboPage: nếu là http thì giữ nguyên, nếu không thì thêm API_URL
+                    if (product.image.startsWith('http://') || product.image.startsWith('https://')) {
+                      imageUrl = product.image;
+                    } else {
+                      imageUrl = getImageUrl(product.image);
+                    }
+                  }
+                  const productName = product.name || (item.comboId ? 'Combo' : 'Sản phẩm');
+                  
                   return (
                     <div className="myorder-product" key={item.id}>
-                      <img src={product.image || '/no-image.png'} alt={product.name || ''} className="myorder-product-img" />
+                      <img src={imageUrl} alt={productName} className="myorder-product-img" />
                       <div className="myorder-product-info">
-                        <div className="myorder-product-name">{product.name}</div>
+                        <div className="myorder-product-name">{productName}</div>
                         <div className="myorder-product-category">
                           {product.categories ? product.categories.map((c: any) => c.name).join(', ') : ''}
                         </div>

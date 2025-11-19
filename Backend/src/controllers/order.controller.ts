@@ -52,12 +52,34 @@ export class OrderController {
           paymentStatus: paymentStatus || 'PENDING',
           status: status || 'PENDING',
           items: {
-            create: items.map((item: any) => ({
-              productId: item.productId || null,
-              comboId: item.comboId || null,
-              quantity: item.quantity,
-              price: item.price
-            }))
+            create: items.map((item: any) => {
+              // ✅ Đảm bảo comboId không bị nhầm thành productId
+              // Nếu có cả productId và comboId, ưu tiên comboId (vì 1 item chỉ có thể là product HOẶC combo)
+              let productId = null;
+              let comboId = null;
+              
+              if (item.comboId) {
+                // ✅ Có comboId → đây là combo, không phải product
+                comboId = item.comboId;
+                productId = null;
+                console.log('✅ Order item is COMBO:', comboId);
+              } else if (item.productId) {
+                // ✅ Có productId → đây là product
+                productId = item.productId;
+                comboId = null;
+                console.log('✅ Order item is PRODUCT:', productId);
+              } else {
+                // ⚠️ Không có cả hai → có thể là lỗi
+                console.warn('⚠️ Order item has neither productId nor comboId:', item);
+              }
+              
+              return {
+                productId,
+                comboId,
+                quantity: item.quantity,
+                price: item.price
+              };
+            })
           }
         },
         include: {

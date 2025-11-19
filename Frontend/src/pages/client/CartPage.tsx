@@ -196,22 +196,34 @@ const CartPage: React.FC = () => {
         alert('Không xác định được tài khoản người dùng. Vui lòng đăng nhập lại!');
         return;
       }
+      // ✅ Log cartItems để debug
+      console.log('🛒 Cart items before creating order:', cartItems);
+      
       const orderData = {
         userId,
         items: cartItems.map(item => {
           if (item.product) {
+            const productId = item.product._id || item.product.id;
+            console.log('📦 Product item:', { productId, name: item.product.name, quantity: item.quantity });
             return {
-              productId: item.product._id,
+              productId,
               quantity: item.quantity,
               price: item.product.price
             };
           } else if (item.combo) {
+            // ✅ Lấy comboId từ _id hoặc id
+            const comboId = item.combo._id || item.combo.id;
+            console.log('🍱 Combo item:', { comboId, name: item.combo.name, quantity: item.quantity, combo: item.combo });
+            if (!comboId) {
+              console.error('❌ Combo item missing ID!', item.combo);
+            }
             return {
-              comboId: item.combo._id,
+              comboId,
               quantity: item.quantity,
               price: item.combo.price
             };
           }
+          console.warn('⚠️ Item has neither product nor combo:', item);
           return null;
         }).filter(Boolean),
         total: totalAmount,
@@ -227,12 +239,36 @@ const CartPage: React.FC = () => {
         wardCode: String(wardCode),
         wardName
       };
+      
+      console.log('📤 Sending order data:', {
+        ...orderData,
+        items: orderData.items.map((item: any) => ({
+          productId: item.productId || null,
+          comboId: item.comboId || null,
+          quantity: item.quantity,
+          price: item.price
+        }))
+      });
+      
       const response = await axios.post('/api/orders', orderData, {
         headers: {
           Authorization: token ? `Bearer ${token}` : '',
         },
       });
       const resData = response.data as any;
+      
+      console.log('📥 Order response from backend:', resData);
+      if (resData.data && resData.data.items) {
+        console.log('📦 Order items in response:', resData.data.items.map((item: any) => ({
+          id: item.id,
+          comboId: item.comboId,
+          productId: item.productId,
+          hasCombo: !!item.combo,
+          hasProduct: !!item.product,
+          combo: item.combo ? { id: item.combo.id, name: item.combo.name, image: item.combo.image } : null
+        })));
+      }
+      
       if (resData.paymentUrl) {
         window.location.href = resData.paymentUrl;
       } else if (resData.data) {

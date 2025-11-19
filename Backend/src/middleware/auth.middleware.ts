@@ -5,9 +5,31 @@ import { UserService } from '../services/user.service';
 
 export const isAuthenticated = async (req: Request, _res: Response, next: NextFunction) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
       throw new AppError('No token provided', 401);
+    }
+
+    // Extract token from "Bearer <token>" format
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      console.error('❌ Token extraction failed. Authorization header:', authHeader?.substring(0, 20) + '...');
+      throw new AppError('Invalid authorization header format. Expected: Bearer <token>', 401);
+    }
+
+    // Log token info for debugging (without exposing full token)
+    console.log('🔐 Token info:', {
+      hasToken: !!token,
+      tokenLength: token.length,
+      tokenPrefix: token.substring(0, 10) + '...',
+      authHeaderFormat: authHeader.startsWith('Bearer ') ? 'correct' : 'incorrect'
+    });
+
+    // Validate token format (JWT should have 3 parts separated by dots)
+    const tokenParts = token.split('.');
+    if (tokenParts.length !== 3) {
+      console.error('❌ Invalid token format. Expected JWT format (3 parts separated by dots). Token parts:', tokenParts.length);
+      throw new AppError('Invalid token format', 401);
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { id?: string; userId?: string; email?: string };

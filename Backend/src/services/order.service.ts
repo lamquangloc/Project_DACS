@@ -105,12 +105,26 @@ export class OrderService {
         phoneNumber: data.phoneNumber,
         note: data.note,
         items: {
-          create: data.items.map((item: any) => ({
-            quantity: item.quantity,
-            price: item.price,
-            productId: item.productId,
-            comboId: item.comboId
-          }))
+          create: data.items.map((item: any) => {
+            // ✅ Đảm bảo comboId không bị nhầm thành productId
+            let productId = null;
+            let comboId = null;
+            
+            if (item.comboId) {
+              comboId = item.comboId;
+              productId = null;
+            } else if (item.productId) {
+              productId = item.productId;
+              comboId = null;
+            }
+            
+            return {
+              quantity: item.quantity,
+              price: item.price,
+              productId,
+              comboId
+            };
+          })
         }
       },
       include: {

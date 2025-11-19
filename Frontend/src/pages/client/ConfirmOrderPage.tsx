@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircleTwoTone } from '@ant-design/icons';
+import comboService from '../../services/comboService';
+import { getImageUrl } from '../../utils/image';
 
 interface ProductItem {
   product?: {
@@ -40,6 +42,7 @@ interface OrderInfo {
 const ConfirmOrderPage: React.FC = () => {
   const navigate = useNavigate();
   const [order, setOrder] = useState<OrderInfo | null>(null);
+  const [itemDetails, setItemDetails] = useState<Map<string, any>>(new Map());
 
   useEffect(() => {
     // Reset giỏ hàng giống logic COD
@@ -60,6 +63,44 @@ const ConfirmOrderPage: React.FC = () => {
       setOrder(JSON.parse(orderData));
     }
   }, []);
+
+  useEffect(() => {
+    if (order && order.items) {
+      fetchItemDetails();
+    }
+    // eslint-disable-next-line
+  }, [order]);
+
+  const fetchItemDetails = async () => {
+    if (!order || !order.items) return;
+    
+    const detailsMap = new Map<string, any>();
+    
+    // ✅ Collect TẤT CẢ comboIds từ order items
+    const comboIds: string[] = [];
+    order.items.forEach((item: any) => {
+      if (item.comboId && !comboIds.includes(item.comboId)) {
+        comboIds.push(item.comboId);
+      }
+    });
+    
+    // Fetch combo details
+    for (const comboId of comboIds) {
+      try {
+        const res = await comboService.getById(comboId);
+        // ✅ res là ApiResponse<Combo>, cần lấy res.data để có Combo object
+        const combo = (res as any).data || res;
+        if (combo && combo.name && combo.image) {
+          detailsMap.set(comboId, combo);
+          console.log('✅ Fetched combo details:', comboId, combo.name, combo.image);
+        }
+      } catch (e) {
+        console.error('Error fetching combo:', comboId, e);
+      }
+    }
+    
+    setItemDetails(detailsMap);
+  };
 
   if (!order) {
     return (
@@ -142,34 +183,55 @@ const ConfirmOrderPage: React.FC = () => {
         <div className="order-products" style={{ marginBottom: 24 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {orderItems.map((item, idx) => {
-              let prod = null;
+              // ✅ Ưu tiên lấy từ itemDetails (đã fetch), sau đó từ item.product/combo, cuối cùng là empty object
+              let product = item.product || item.combo || {};
               let isCombo = false;
-              if (item.combo) {
-                prod = item.combo;
-                isCombo = true;
-              } else if (item.comboId) {
-                // Combo fields at root (not nested)
-                prod = {
-                  id: item.comboId,
-                  name: item.comboName || item.name || 'Combo',
-                  image: item.comboImage || item.image || '/placeholder-product.jpg',
-                  price: item.price
-                };
+              
+              // ✅ Nếu có comboId, luôn ưu tiên lấy từ itemDetails (đã fetch đầy đủ)
+              if (item.comboId) {
+                const fetchedCombo = itemDetails.get(item.comboId);
+                if (fetchedCombo && fetchedCombo.name && fetchedCombo.image) {
+                  product = fetchedCombo;
+                  isCombo = true;
+                } else if (item.combo) {
+                  product = item.combo;
+                  isCombo = true;
+                } else if (!product.name || !product.image) {
+                  // Nếu chưa fetch được, vẫn dùng product hiện tại nhưng sẽ fetch sau
+                  console.log('⚠️ Combo not fetched yet:', item.comboId, 'product:', product);
+                  isCombo = true;
+                } else {
+                  isCombo = true;
+                }
+              } else if (item.combo) {
+                product = item.combo;
                 isCombo = true;
               } else if (item.product) {
-                prod = item.product;
+                product = item.product;
               } else {
-                prod = item;
+                product = item;
               }
-              const name = prod?.name || (isCombo ? 'Combo' : 'Sản phẩm');
-              const img = prod?.image || '/placeholder-product.jpg';
-              const price = prod?.price ?? 0;
+              
+              // ✅ Sử dụng getImageUrl để format image URL đúng (giống ComboPage)
+              let imageUrl = '/no-image.png';
+              if (product.image) {
+                // Format giống ComboPage: nếu là http thì giữ nguyên, nếu không thì thêm API_URL
+                if (product.image.startsWith('http://') || product.image.startsWith('https://')) {
+                  imageUrl = product.image;
+                } else {
+                  imageUrl = getImageUrl(product.image);
+                }
+              }
+              
+              const productName = product.name || (isCombo ? 'Combo' : 'Sản phẩm');
+              const price = product.price ?? item.price ?? 0;
               const quantity = item?.quantity ?? 0;
+              
               return (
-                <div key={prod?.id || prod?._id || idx} style={{ display: 'flex', alignItems: 'center', gap: 18, background: '#fafafa', borderRadius: 8, padding: 10 }}>
-                  <img src={img} alt={name} style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6 }} />
+                <div key={product?.id || product?._id || item?.id || idx} style={{ display: 'flex', alignItems: 'center', gap: 18, background: '#fafafa', borderRadius: 8, padding: 10 }}>
+                  <img src={imageUrl} alt={productName} style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6 }} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 500 }}>{name}{isCombo && <span style={{ color: '#1976d2', marginLeft: 8 }}>[Combo]</span>}</div>
+                    <div style={{ fontWeight: 500 }}>{productName}{isCombo && <span style={{ color: '#1976d2', marginLeft: 8 }}>[Combo]</span>}</div>
                     <div style={{ color: '#666' }}>Số lượng: {quantity}</div>
                   </div>
                   <div style={{ fontWeight: 600, color: '#e53935', minWidth: 90, textAlign: 'right' }}>{(price * quantity).toLocaleString()}đ</div>

@@ -26,9 +26,9 @@ class N8nService {
   constructor() {
     // Sử dụng webhook URL mặc định nếu chưa được cấu hình
     // LƯU Ý: Phải dùng Production URL, không dùng Test URL
-    // Test URL: https://tunz123.app.n8n.cloud/webhook-test/restaurant-chat (chỉ test trong editor)
-    // Production URL: https://tunz123.app.n8n.cloud/webhook/restaurant-chat (dùng cho production)
-    this.webhookUrl = process.env.N8N_WEBHOOK_URL || 'https://tunz123.app.n8n.cloud/webhook/restaurant-chat';
+    // Test URL: https://tunz1234.app.n8n.cloud/webhook-test/restaurant-chat (chỉ test trong editor)
+    // Production URL: https://tunz1234.app.n8n.cloud/webhook/restaurant-chat (dùng cho production)
+    this.webhookUrl = process.env.N8N_WEBHOOK_URL || 'https://tunz1234.app.n8n.cloud/webhook/restaurant-chat';
     this.apiKey = process.env.N8N_API_KEY;
     
     if (!process.env.N8N_WEBHOOK_URL) {

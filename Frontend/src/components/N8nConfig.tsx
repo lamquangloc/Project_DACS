@@ -16,11 +16,11 @@ const N8nConfig: React.FC<N8nConfigProps> = ({ onConfigChange }) => {
     const savedConfig = localStorage.getItem('n8n-config');
     if (savedConfig) {
       const config = JSON.parse(savedConfig);
-      setWebhookUrl(config.webhookUrl || 'https://tunz123.app.n8n.cloud/webhook/restaurant-chat');
+      setWebhookUrl(config.webhookUrl || 'https://tunz1234.app.n8n.cloud/webhook/restaurant-chat');
       setApiKey(config.apiKey || '');
     } else {
       // Set default webhook URL
-      setWebhookUrl('https://tunz123.app.n8n.cloud/webhook/restaurant-chat');
+      setWebhookUrl('https://tunz1234.app.n8n.cloud/webhook/restaurant-chat');
     }
   }, []);
 
@@ -95,7 +95,7 @@ const N8nConfig: React.FC<N8nConfigProps> = ({ onConfigChange }) => {
           type="text"
           value={webhookUrl}
           onChange={(e) => setWebhookUrl(e.target.value)}
-          placeholder="https://tunz123.app.n8n.cloud/webhook/restaurant-chat"
+          placeholder="https://tunz1234.app.n8n.cloud/webhook/restaurant-chat"
           style={{ 
             width: '100%', 
             padding: '8px', 

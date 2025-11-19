@@ -26,9 +26,9 @@ class N8nService {
   constructor() {
     // Sử dụng webhook URL mặc định nếu chưa được cấu hình
     // LƯU Ý: Phải dùng Production URL, không dùng Test URL
-    // Test URL: https://tunz123.app.n8n.cloud/webhook-test/restaurant-chat (chỉ test trong editor)
-    // Production URL: https://tunz123.app.n8n.cloud/webhook/restaurant-chat (dùng cho production)
-    this.webhookUrl = process.env.N8N_WEBHOOK_URL || 'https://tunz123.app.n8n.cloud/webhook/restaurant-chat';
+    // Test URL: https://tunz1234.app.n8n.cloud/webhook-test/restaurant-chat (chỉ test trong editor)
+    // Production URL: https://tunz1234.app.n8n.cloud/webhook/restaurant-chat (dùng cho production)
+    this.webhookUrl = process.env.N8N_WEBHOOK_URL || 'https://tunz1234.app.n8n.cloud/webhook/restaurant-chat';
     this.apiKey = process.env.N8N_API_KEY;
     
     if (!process.env.N8N_WEBHOOK_URL) {
@@ -284,18 +284,42 @@ class N8nService {
       let responseCartData = data.cart || data.context?.cart || null;
       let cleanedReply = reply; // Reply sau khi loại bỏ JSON block
       
-      // Nếu chưa tìm thấy, thử parse từ reply text (n8n có thể trả về JSON trong reply)
-      if (!responseCartData && reply) {
+      console.log('🔍 Checking for cart data in reply:', {
+        hasCartInData: !!responseCartData,
+        replyLength: reply?.length || 0,
+        replyEndsWithBrace: reply?.endsWith('}') || false,
+        replyLast100Chars: reply?.substring(Math.max(0, reply.length - 100)) || ''
+      });
+      
+      // QUAN TRỌNG: Luôn clean JSON khỏi reply (dù đã có cart data hay chưa)
+      // Nếu chưa có cart data, thử parse từ reply text (n8n có thể trả về JSON trong reply)
+      // Nếu đã có cart data nhưng reply vẫn có JSON, vẫn phải clean JSON khỏi reply
+      if (reply) {
         try {
           // Tìm JSON block trong reply text (ví dụ: ```json {...} ```)
+          // Pattern: có thể có newlines trước/sau ```json và ```
           const jsonBlockMatch = reply.match(/```json\s*([\s\S]*?)\s*```/);
           if (jsonBlockMatch && jsonBlockMatch[1]) {
-            const parsedJson = JSON.parse(jsonBlockMatch[1].trim());
-            if (parsedJson.cart) {
-              responseCartData = parsedJson.cart;
-              // Loại bỏ JSON block khỏi reply để user không thấy JSON
+            try {
+              const parsedJson = JSON.parse(jsonBlockMatch[1].trim());
+              if (parsedJson.cart) {
+                // Nếu chưa có cart data, extract từ JSON block
+                if (!responseCartData) {
+                  responseCartData = parsedJson.cart;
+                  console.log('✅ Found cart data in JSON block from reply text');
+                }
+                // Luôn loại bỏ JSON block khỏi reply để user không thấy JSON
+                // Pattern: ```json ... ``` (có thể có newlines trước/sau)
+                cleanedReply = reply.replace(/```json\s*[\s\S]*?\s*```/g, '').trim();
+                // Loại bỏ các newlines thừa ở cuối (có thể có \n\n\n sau khi remove JSON block)
+                cleanedReply = cleanedReply.replace(/\n{3,}/g, '\n\n').trim();
+                console.log('✅ Cleaned JSON block from reply');
+              }
+            } catch (e) {
+              // Không parse được, nhưng vẫn clean JSON block khỏi reply
               cleanedReply = reply.replace(/```json\s*[\s\S]*?\s*```/g, '').trim();
-              console.log('✅ Found cart data in JSON block from reply text');
+              // Loại bỏ các newlines thừa ở cuối
+              cleanedReply = cleanedReply.replace(/\n{3,}/g, '\n\n').trim();
             }
           }
           
@@ -320,7 +344,7 @@ class N8nService {
           }
           
           // THÊM: Tìm JSON ở cuối reply text (không có code block, chỉ là JSON thuần)
-          // Pattern phổ biến: text...\n{"cart": {...}}
+          // Pattern phổ biến: text...\n{"cart": {...}} hoặc text...{"cart": {...}}
           if (!responseCartData) {
             // Tách reply thành các dòng và tìm dòng JSON ở cuối
             const lines = reply.split('\n');
@@ -361,7 +385,111 @@ class N8nService {
                       console.log('✅ Found cart data by parsing JSON from last { brace');
                     }
                   } catch (e2) {
-                    // Không parse được
+                    // Không parse được từ lastOpenBrace, thử tìm JSON ở cuối text (append trực tiếp)
+                    // Pattern: text...{"cart": {...}} (không có newline)
+                    // Tìm từ cuối reply ngược lại để tìm JSON object
+                    let jsonStart = -1;
+                    let braceCount = 0;
+                    let jsonEnd = reply.length;
+                    
+                    // Tìm từ cuối reply ngược lại để tìm JSON object hoàn chỉnh
+                    for (let i = reply.length - 1; i >= 0; i--) {
+                      if (reply[i] === '}') {
+                        if (braceCount === 0) {
+                          jsonEnd = i + 1;
+                        }
+                        braceCount++;
+                      } else if (reply[i] === '{') {
+                        braceCount--;
+                        if (braceCount === 0) {
+                          jsonStart = i;
+                          break;
+                        }
+                      }
+                    }
+                    
+                    // Nếu tìm thấy JSON object hoàn chỉnh
+                    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+                      const jsonCandidate = reply.substring(jsonStart, jsonEnd).trim();
+                      try {
+                        const parsedJson = JSON.parse(jsonCandidate);
+                        if (parsedJson.cart) {
+                          responseCartData = parsedJson.cart;
+                          cleanedReply = reply.substring(0, jsonStart).trim();
+                          console.log('✅ Found cart data by parsing JSON appended at end of reply');
+                        }
+                      } catch (e3) {
+                        // Không parse được
+                      }
+                    }
+                  }
+                }
+              }
+            } else {
+              // Không tìm thấy JSON trên dòng riêng, thử tìm JSON append trực tiếp vào cuối text
+              // Pattern: text...{"cart": {...}} (không có newline)
+              // Dùng regex để tìm JSON object ở cuối reply
+              const jsonAtEndRegex = /\{[\s\S]*"cart"[\s\S]*\}$/;
+              const jsonMatch = reply.match(jsonAtEndRegex);
+              
+              if (jsonMatch) {
+                const jsonCandidate = jsonMatch[0].trim();
+                try {
+                  const parsedJson = JSON.parse(jsonCandidate);
+                  if (parsedJson.cart) {
+                    // Nếu chưa có cart data, extract từ JSON
+                    if (!responseCartData) {
+                      responseCartData = parsedJson.cart;
+                      console.log('✅ Found cart data by regex match at end of reply');
+                    }
+                    // Luôn clean JSON khỏi reply
+                    cleanedReply = reply.substring(0, reply.length - jsonCandidate.length).trim();
+                    console.log('✅ Cleaned JSON from end of reply (regex match)');
+                    console.log('✅ Cleaned reply:', cleanedReply.substring(0, 100));
+                  }
+                } catch (e4) {
+                  console.log('⚠️ Failed to parse JSON from regex match:', e4);
+                }
+              }
+              
+              // Fallback: Tìm từ lastOpenBrace nếu regex không match
+              // Chỉ tìm nếu chưa clean được JSON (cleanedReply vẫn bằng reply ban đầu)
+              if (cleanedReply === reply) {
+                const lastOpenBrace = reply.lastIndexOf('{');
+                if (lastOpenBrace >= 0) {
+                  // Tìm JSON object hoàn chỉnh từ lastOpenBrace
+                  let braceCount = 0;
+                  let jsonEnd = reply.length;
+                  
+                  for (let i = lastOpenBrace; i < reply.length; i++) {
+                    if (reply[i] === '{') braceCount++;
+                    if (reply[i] === '}') {
+                      braceCount--;
+                      if (braceCount === 0) {
+                        jsonEnd = i + 1;
+                        break;
+                      }
+                    }
+                  }
+                  
+                  if (jsonEnd > lastOpenBrace) {
+                    const jsonCandidate = reply.substring(lastOpenBrace, jsonEnd).trim();
+                    try {
+                      const parsedJson = JSON.parse(jsonCandidate);
+                      if (parsedJson.cart) {
+                        // Nếu chưa có cart data, extract từ JSON
+                        if (!responseCartData) {
+                          responseCartData = parsedJson.cart;
+                          console.log('✅ Found cart data by parsing JSON appended directly at end of reply');
+                        }
+                        // Luôn clean JSON khỏi reply
+                        cleanedReply = reply.substring(0, lastOpenBrace).trim();
+                        console.log('✅ Cleaned JSON from end of reply (lastOpenBrace)');
+                        console.log('✅ Cleaned reply:', cleanedReply.substring(0, 100));
+                      }
+                    } catch (e4) {
+                      console.log('⚠️ Failed to parse JSON from lastOpenBrace:', e4);
+                    }
                   }
                 }
               }
@@ -379,6 +507,14 @@ class N8nService {
           total: responseCartData.total
         });
       }
+      
+      // Log để debug
+      console.log('📝 Reply cleaning result:', {
+        originalLength: reply?.length || 0,
+        cleanedLength: cleanedReply?.length || 0,
+        wasCleaned: cleanedReply !== reply,
+        cleanedReplyPreview: cleanedReply?.substring(0, 150) || ''
+      });
       
       return {
         reply: cleanedReply || reply, // Sử dụng cleaned reply (đã loại bỏ JSON block)

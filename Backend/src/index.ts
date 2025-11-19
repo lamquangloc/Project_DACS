@@ -62,7 +62,7 @@ const corsOptions = {
     }
     
     // Allow ngrok domains (for n8n cloud)
-    if (origin.includes('.ngrok.io') || origin.includes('.ngrok-free.app')) {
+    if (origin.includes('.ngrok.io') || origin.includes('.ngrok-free.app') || origin.includes('.ngrok-free.dev')) {
       return callback(null, true);
     }
     

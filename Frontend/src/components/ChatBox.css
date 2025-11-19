@@ -1034,6 +1034,89 @@
   }
 }
 
+/* ✅ Order Info Cards trong Markdown List */
+.message-text .order-info-card-list-item {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px 0;
+}
+
+.order-info-card-inline {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+  border: 1.5px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: all 0.3s ease;
+  min-height: 70px;
+  width: 100%;
+}
+
+.order-info-card-icon-wrapper {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: all 0.3s ease;
+}
+
+.order-info-card-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.order-info-card-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.order-info-card-value {
+  font-size: 15px;
+  font-weight: 500;
+  color: #1a1a1a;
+  line-height: 1.4;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Responsive cho Order Info Cards */
+@media (max-width: 768px) {
+  .order-info-card-inline {
+    padding: 12px 14px;
+    gap: 12px;
+    min-height: 64px;
+  }
+
+  .order-info-card-icon-wrapper {
+    width: 48px;
+    height: 48px;
+    font-size: 20px;
+  }
+
+  .order-info-card-label {
+    font-size: 12px;
+  }
+
+  .order-info-card-value {
+    font-size: 14px;
+  }
+}
+
 /* ✅ Action Cards trong Markdown List */
 .message-text .action-card-list-item {
   list-style: none;

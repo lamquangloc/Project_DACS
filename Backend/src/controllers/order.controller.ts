@@ -52,12 +52,34 @@ export class OrderController {
           paymentStatus: paymentStatus || 'PENDING',
           status: status || 'PENDING',
           items: {
-            create: items.map((item: any) => ({
-              productId: item.productId || null,
-              comboId: item.comboId || null,
-              quantity: item.quantity,
-              price: item.price
-            }))
+            create: items.map((item: any) => {
+              // ✅ Đảm bảo comboId không bị nhầm thành productId
+              // Nếu có cả productId và comboId, ưu tiên comboId (vì 1 item chỉ có thể là product HOẶC combo)
+              let productId = null;
+              let comboId = null;
+              
+              if (item.comboId) {
+                // ✅ Có comboId → đây là combo, không phải product
+                comboId = item.comboId;
+                productId = null;
+                console.log('✅ Order item is COMBO:', comboId);
+              } else if (item.productId) {
+                // ✅ Có productId → đây là product
+                productId = item.productId;
+                comboId = null;
+                console.log('✅ Order item is PRODUCT:', productId);
+              } else {
+                // ⚠️ Không có cả hai → có thể là lỗi
+                console.warn('⚠️ Order item has neither productId nor comboId:', item);
+              }
+              
+              return {
+                productId,
+                comboId,
+                quantity: item.quantity,
+                price: item.price
+              };
+            })
           }
         },
         include: {
@@ -115,39 +137,170 @@ export class OrderController {
    */
   static async createOrderFromChatbot(req: Request, res: Response, _next: NextFunction) {
     try {
-      const { userId, items, totalAmount, total, status, sessionId, source, address, phoneNumber, note, paymentStatus } = req.body;
+      const { 
+        userId, 
+        items, 
+        totalAmount, 
+        total, 
+        status, 
+        sessionId, 
+        source, 
+        address, 
+        phoneNumber, 
+        note, 
+        paymentStatus,
+        provinceCode,
+        provinceName,
+        districtCode,
+        districtName,
+        wardCode,
+        wardName
+      } = req.body;
 
       // Validation (ít field hơn, phù hợp với chatbot)
-      if (!userId || !items || !Array.isArray(items) || items.length === 0 || (!totalAmount && !total)) {
+      // Kiểm tra totalAmount/total: phải là số và > 0 (không chỉ truthy)
+      const finalTotal = totalAmount !== undefined && totalAmount !== null ? Number(totalAmount) : (total !== undefined && total !== null ? Number(total) : null);
+      
+      // Kiểm tra tất cả điều kiện
+      if (!userId) {
         return res.status(400).json({
           success: false,
           status: 'error',
           error: 'Missing required fields',
-          message: 'Thiếu thông tin bắt buộc: userId, items, totalAmount',
+          message: 'Thiếu thông tin bắt buộc: userId',
           details: {
-            hasUserId: !!userId,
-            hasItems: !!items,
-            itemsLength: items?.length || 0,
-            hasTotal: !!(totalAmount || total)
+            hasUserId: false,
+            userId: userId
           }
         });
       }
-
-      const finalTotal = totalAmount || total;
-
-      // Validate items format
-      const validItems = items.filter((item: any) => 
+      
+      // Parse items nếu nó là string hoặc object
+      let parsedItems = items;
+      
+      // Xử lý trường hợp items là string
+      if (typeof items === 'string') {
+        // Nếu là "[object Object]" - có nghĩa là object đã bị convert thành string sai cách
+        if (items === '[object Object]' || items.startsWith('[object')) {
+          return res.status(400).json({
+            success: false,
+            status: 'error',
+            error: 'Invalid items format',
+            message: 'Items là object nhưng bị convert thành string sai cách. Trong n8n, cần dùng JSON.stringify() hoặc để n8n tự serialize.',
+            details: {
+              hasItems: !!items,
+              itemsType: typeof items,
+              itemsValue: items,
+              suggestion: 'Trong n8n JSON body, dùng {{ $json.items }} (n8n sẽ tự serialize array thành JSON)'
+            }
+          });
+        }
+        
+        // Thử parse JSON string
+        try {
+          parsedItems = JSON.parse(items);
+        } catch (e) {
+          return res.status(400).json({
+            success: false,
+            status: 'error',
+            error: 'Invalid items format',
+            message: 'Items là string nhưng không phải JSON hợp lệ',
+            details: {
+              hasItems: !!items,
+              itemsType: typeof items,
+              itemsValue: items?.substring(0, 200), // First 200 chars for debugging
+              parseError: e instanceof Error ? e.message : 'Unknown error'
+            }
+          });
+        }
+      }
+      
+      // Xử lý trường hợp items là object (single item) - convert thành array
+      if (parsedItems && typeof parsedItems === 'object' && !Array.isArray(parsedItems)) {
+        // Nếu là single item object, convert thành array
+        if (parsedItems.productId || parsedItems.comboId) {
+          parsedItems = [parsedItems];
+        } else {
+          return res.status(400).json({
+            success: false,
+            status: 'error',
+            error: 'Invalid items format',
+            message: 'Items là object nhưng không phải item hợp lệ (thiếu productId hoặc comboId)',
+            details: {
+              hasItems: !!items,
+              itemsType: typeof items,
+              parsedItemsType: typeof parsedItems,
+              parsedItemsKeys: Object.keys(parsedItems),
+              parsedItemsValue: parsedItems
+            }
+          });
+        }
+      }
+      
+      if (!parsedItems || !Array.isArray(parsedItems) || parsedItems.length === 0) {
+        return res.status(400).json({
+          success: false,
+          status: 'error',
+          error: 'Missing required fields',
+          message: 'Thiếu thông tin bắt buộc: items (phải là array và có ít nhất 1 item)',
+          details: {
+            hasItems: !!items,
+            isArray: Array.isArray(parsedItems),
+            itemsLength: parsedItems?.length || 0,
+            itemsType: typeof items,
+            parsedItemsType: typeof parsedItems,
+            originalItemsType: typeof items
+          }
+        });
+      }
+      
+      // Sử dụng parsedItems thay vì items từ đây
+      const itemsToUse = parsedItems;
+      
+      // Validate items format (sau khi đã parse)
+      const validItems = itemsToUse && Array.isArray(itemsToUse) ? itemsToUse.filter((item: any) => 
         item && (item.productId || item.comboId) && item.quantity && item.price
-      );
-
+      ) : [];
+      
       if (validItems.length === 0) {
         return res.status(400).json({
           success: false,
           status: 'error',
           error: 'Invalid items format',
-          message: 'Items phải có productId hoặc comboId, quantity, và price'
+          message: 'Items phải có productId hoặc comboId, quantity, và price',
+          details: {
+            itemsLength: itemsToUse?.length || 0,
+            validItemsLength: validItems.length,
+            firstItem: itemsToUse?.[0] || null,
+            firstItemKeys: itemsToUse?.[0] ? Object.keys(itemsToUse[0]) : [],
+            sampleItems: itemsToUse?.slice(0, 3) || [],
+            allItemsHaveProductId: itemsToUse?.every((item: any) => item?.productId) || false,
+            allItemsHaveComboId: itemsToUse?.every((item: any) => item?.comboId) || false,
+            itemsWithProductId: itemsToUse?.filter((item: any) => item?.productId).length || 0,
+            itemsWithComboId: itemsToUse?.filter((item: any) => item?.comboId).length || 0
+          }
         });
       }
+      
+      if (finalTotal === null || isNaN(finalTotal) || finalTotal <= 0) {
+        return res.status(400).json({
+          success: false,
+          status: 'error',
+          error: 'Missing required fields',
+          message: 'Thiếu thông tin bắt buộc: totalAmount (phải là số và > 0)',
+          details: {
+            hasTotal: !!(totalAmount || total),
+            totalAmountValue: totalAmount,
+            totalValue: total,
+            finalTotalValue: finalTotal,
+            totalAmountType: typeof totalAmount,
+            totalType: typeof total,
+            isNaN: isNaN(finalTotal),
+            isLessOrEqualZero: finalTotal <= 0
+          }
+        });
+      }
+
 
       // Get the next order number
       const sequence = await prisma.sequence.upsert({
@@ -169,12 +322,12 @@ export class OrderController {
           // Default values cho chatbot orders (có thể cập nhật sau)
           address: address || 'Chưa có địa chỉ - Đơn từ chatbot',
           phoneNumber: phoneNumber || 'Chưa có số điện thoại',
-          provinceCode: req.body.provinceCode || '',
-          provinceName: req.body.provinceName || '',
-          districtCode: req.body.districtCode || '',
-          districtName: req.body.districtName || '',
-          wardCode: req.body.wardCode || '',
-          wardName: req.body.wardName || '',
+          provinceCode: provinceCode || '',
+          provinceName: provinceName || '',
+          districtCode: districtCode || '',
+          districtName: districtName || '',
+          wardCode: wardCode || '',
+          wardName: wardName || '',
           note: note || `Đơn từ chatbot${sessionId ? ` (session: ${sessionId})` : ''}${source ? ` - ${source}` : ''}`,
           paymentStatus: paymentStatus || 'PENDING',
           status: status || 'PENDING',
@@ -199,13 +352,13 @@ export class OrderController {
               id: true,
               name: true,
               email: true,
-              phone: true
+              phoneNumber: true
             }
           }
         }
       });
 
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
         status: 'success',
         message: 'Order created successfully from chatbot',
@@ -216,6 +369,15 @@ export class OrderController {
           items: order.items,
           total: order.total,
           status: order.status,
+          address: order.address,
+          phoneNumber: order.phoneNumber,
+          provinceCode: order.provinceCode,
+          provinceName: order.provinceName,
+          districtCode: order.districtCode,
+          districtName: order.districtName,
+          wardCode: order.wardCode,
+          wardName: order.wardName,
+          note: order.note,
           createdAt: order.createdAt
         },
         order: {
@@ -224,12 +386,21 @@ export class OrderController {
           userId: order.userId,
           items: order.items,
           total: order.total,
-          status: order.status
+          status: order.status,
+          address: order.address,
+          phoneNumber: order.phoneNumber,
+          provinceCode: order.provinceCode,
+          provinceName: order.provinceName,
+          districtCode: order.districtCode,
+          districtName: order.districtName,
+          wardCode: order.wardCode,
+          wardName: order.wardName,
+          note: order.note
         }
       });
     } catch (error) {
       console.error('Error creating order from chatbot:', error);
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         status: 'error',
         error: 'Failed to create order',

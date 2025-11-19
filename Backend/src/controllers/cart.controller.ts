@@ -159,19 +159,36 @@ export const addItem = async (req: Request, res: Response): Promise<void> => {
       throw new AppError('User ID is required', 400);
     }
 
-    const { productId, name, price, quantity, image } = req.body;
+    const { productId, comboId, name, price, quantity, image } = req.body;
 
-    if (!productId || !name || !price || !quantity) {
-      throw new AppError('Missing required fields: productId, name, price, quantity', 400);
+    // ✅ Phải có productId HOẶC comboId (không phải cả hai, không phải không có)
+    if (!productId && !comboId) {
+      throw new AppError('Missing required field: productId or comboId is required', 400);
     }
 
-    const cart = await cartService.addItemToCart(userId, {
-      productId,
+    if (!name || !price || !quantity) {
+      throw new AppError('Missing required fields: name, price, quantity', 400);
+    }
+
+    // ✅ Đảm bảo chỉ có một trong hai: productId hoặc comboId
+    const itemData: any = {
       name,
       price,
       quantity,
       image,
-    });
+    };
+
+    if (comboId) {
+      itemData.comboId = comboId;
+      itemData.productId = undefined;
+      console.log('✅ Adding COMBO to cart:', { comboId, name, quantity });
+    } else if (productId) {
+      itemData.productId = productId;
+      itemData.comboId = undefined;
+      console.log('✅ Adding PRODUCT to cart:', { productId, name, quantity });
+    }
+
+    const cart = await cartService.addItemToCart(userId, itemData);
 
     res.status(200).json({
       success: true,

@@ -80,7 +80,17 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept']
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'Origin', 
+    'X-Requested-With', 
+    'Accept', 
+    'Cache-Control', 
+    'Pragma',
+    'If-Modified-Since',
+    'If-None-Match'
+  ]
 };
 
 app.use(cors(corsOptions));

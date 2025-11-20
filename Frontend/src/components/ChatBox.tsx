@@ -534,27 +534,40 @@ const ChatBox: React.FC = () => {
     // Chỉ xử lý nếu có từ "combo"
     if (!lowerText.includes('combo')) return null;
     
-    // Pattern 1: "Combo [tên]" - extract tên combo (cải thiện regex)
-    // Ví dụ: "Combo cặp đôi" hoặc "Nhà hàng có Combo cặp đôi với mô tả..."
+    // Pattern 1: "Combo [tên]" hoặc "- Combo [tên] - giá" - extract tên combo (cải thiện regex)
+    // Ví dụ: "Combo cặp đôi" hoặc "Nhà hàng có Combo cặp đôi với mô tả..." hoặc "- Combo cặp đôi - 650.000₫"
     // Match: "combo" + tên (có thể có dấu cách, không có dấu phẩy, dấu chấm, hoặc từ "với", "mô tả", "giá")
-    const comboNameMatch = cleanText.match(/(?:^|\s)(?:combo\s+)([^,\-\.\n]+?)(?:\s+với|\s+mô\s+tả|\s+là\s+combo|\s+giá|,|\.|$)/i);
+    // Hỗ trợ format list item: "- Combo cặp đôi - 650.000₫"
+    const comboNameMatch = cleanText.match(/(?:^|\s|-)\s*(?:combo\s+)([^,\-\.\n]+?)(?:\s*-\s*[\d.,\s]+[₫đ]?|\s+với|\s+mô\s+tả|\s+là\s+combo|\s+giá|,|\.|$)/i);
     if (comboNameMatch) {
       let comboName = comboNameMatch[1].trim();
       // Loại bỏ các từ thừa ở cuối
       comboName = comboName.replace(/\s+(với|mô\s+tả|là|giá).*$/i, '').trim();
       
-      // Extract giá từ text (tìm "giá" + số)
+      // Extract giá từ text (tìm "giá" + số hoặc "- giá" format)
       let price: string | undefined;
-      const priceMatch = cleanText.match(/giá\s+([\d.,\s]+[₫đ]?)/i);
-      if (priceMatch) {
-        price = priceMatch[1].trim();
+      // Thử lấy giá từ match group 2 (format "- Combo [tên] - giá")
+      if (comboNameMatch[2]) {
+        price = comboNameMatch[2].trim();
         if (!price.includes('₫') && !price.includes('đ')) {
           price = `${price}₫`;
+        }
+      } else {
+        // Thử tìm giá theo format "giá ..."
+        const priceMatch = cleanText.match(/giá\s+([\d.,\s]+[₫đ]?)/i);
+        if (priceMatch) {
+          price = priceMatch[1].trim();
+          if (!price.includes('₫') && !price.includes('đ')) {
+            price = `${price}₫`;
+          }
         }
       }
       
       if (comboName.length > 2) {
-        return { name: comboName, price };
+        // ✅ Trả về tên combo với prefix "combo" để dễ tìm trong cache
+        // Cache có thể lưu với key "combo cặp đôi" hoặc "cặp đôi"
+        const comboNameWithPrefix = `combo ${comboName}`;
+        return { name: comboNameWithPrefix, price };
       }
     }
     
@@ -883,21 +896,98 @@ const ChatBox: React.FC = () => {
     let comboDisplayPrice = comboInfo.price || '';
     let combo: { id: string; name: string; image?: string; price?: number; slug?: string } | null = null;
     
+    console.log('🎨 Rendering combo card from info:', {
+      comboName,
+      comboDisplayPrice,
+      combosCacheSize: combosCache.size
+    });
+    
     // Tìm combo trong cache
     if (comboName) {
       combo = findComboInCache(comboName);
+      console.log('🔍 First search result:', combo ? { id: combo.id, name: combo.name, hasImage: !!combo.image } : 'Not found');
+      
       if (!combo && !comboName.toLowerCase().startsWith('combo')) {
         combo = findComboInCache(`combo ${comboName}`);
+        console.log('🔍 Second search result (with "combo" prefix):', combo ? { id: combo.id, name: combo.name, hasImage: !!combo.image } : 'Not found');
+      }
+      
+      // Nếu vẫn không tìm thấy, thử tìm với các biến thể khác
+      if (!combo) {
+        // Thử tìm với tên không có dấu
+        const nameWithoutTones = removeVietnameseTones(comboName).toLowerCase();
+        combo = findComboInCache(nameWithoutTones);
+        console.log('🔍 Third search result (without tones):', combo ? { id: combo.id, name: combo.name, hasImage: !!combo.image } : 'Not found');
+      }
+      
+      // Nếu vẫn không tìm thấy, thử fuzzy match trong cache
+      if (!combo) {
+        const normalizedSearch = normalizeText(comboName);
+        for (const [key, cachedCombo] of combosCache.entries()) {
+          if (key.includes(normalizedSearch) || normalizedSearch.includes(key)) {
+            combo = cachedCombo;
+            console.log('🔍 Fuzzy match found:', { key, combo: { id: combo.id, name: combo.name, hasImage: !!combo.image } });
+            break;
+          }
+        }
       }
     }
     
+    console.log('🔍 Final combo found:', combo ? { id: combo.id, name: combo.name, hasImage: !!combo.image, image: combo.image } : 'Not found');
+    
     if (!combo && (!comboName || comboName.length < 2)) {
+      console.warn('⚠️ Cannot render combo card:', {
+        comboName,
+        comboNameLength: comboName?.length,
+        hasCombo: !!combo
+      });
       return null;
     }
     
     const finalComboName = combo?.name || comboName;
     const comboSlug = combo?.slug || `${removeVietnameseTones(comboName)}-${combo?.id || 'unknown'}`;
-    const comboImageUrl = combo?.image ? getImageUrl(combo.image) : null;
+    let comboImageUrl = combo?.image ? getImageUrl(combo.image) : null;
+    
+    // ✅ Nếu combo được tìm thấy nhưng không có image, fetch từ API
+    if (combo?.id && !comboImageUrl) {
+      console.log('📥 Fetching combo image from API:', combo.id);
+      fetch(`${API_URL}/api/combos/${combo.id}`)
+        .then(res => res.json())
+        .then(data => {
+          const comboDetail = data.data || data;
+          if (comboDetail?.image) {
+            console.log('✅ Fetched combo image:', comboDetail.image);
+            // Cập nhật cache với image mới
+            const updatedCombo = { ...combo, image: comboDetail.image };
+            const normalizedName = normalizeText(combo.name);
+            const originalName = combo.name.toLowerCase().trim();
+            setCombosCache(prev => {
+              const newCache = new Map(prev);
+              newCache.set(normalizedName, updatedCombo);
+              newCache.set(originalName, updatedCombo);
+              const nameWithoutTones = removeVietnameseTones(combo.name).toLowerCase();
+              if (nameWithoutTones !== normalizedName) {
+                newCache.set(nameWithoutTones, updatedCombo);
+              }
+              const comboKey = `combo ${normalizedName}`;
+              newCache.set(comboKey, updatedCombo);
+              return newCache;
+            });
+            setImageUpdateTrigger(prev => prev + 1);
+          }
+        })
+        .catch(error => {
+          console.error('❌ Error fetching combo image:', error);
+        });
+    }
+    
+    // ✅ Sử dụng imageUpdateTrigger để đảm bảo re-render khi image được fetch
+    const _ = imageUpdateTrigger; // eslint-disable-line
+    
+    // Re-fetch image URL sau khi có thể đã được update
+    if (combo?.image) {
+      comboImageUrl = getImageUrl(combo.image);
+    }
     
     if (!comboDisplayPrice && combo?.price) {
       comboDisplayPrice = `${combo.price.toLocaleString('vi-VN')}₫`;

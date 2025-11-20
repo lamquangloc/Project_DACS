@@ -1117,6 +1117,99 @@
   }
 }
 
+/* Cart Summary Card Styles */
+.cart-summary-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 12px 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e0e0e0;
+  transition: box-shadow 0.3s ease;
+}
+
+.cart-summary-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.cart-summary-card h4 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.cart-summary-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.cart-summary-item:last-of-type {
+  border-bottom: none;
+}
+
+.cart-summary-item-name {
+  color: #666;
+  font-size: 14px;
+  flex: 1;
+}
+
+.cart-summary-item-price {
+  color: #333;
+  font-size: 14px;
+  font-weight: 500;
+  margin-left: 12px;
+}
+
+.cart-summary-total {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 2px solid #e0e0e0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cart-summary-total-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.cart-summary-total-amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: #d32f2f;
+}
+
+@media (max-width: 768px) {
+  .cart-summary-card {
+    padding: 12px;
+    margin: 8px 0;
+  }
+  
+  .cart-summary-card h4 {
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+  
+  .cart-summary-item-name,
+  .cart-summary-item-price {
+    font-size: 13px;
+  }
+  
+  .cart-summary-total-label {
+    font-size: 14px;
+  }
+  
+  .cart-summary-total-amount {
+    font-size: 16px;
+  }
+}
+
 /* ✅ Action Cards trong Markdown List */
 .message-text .action-card-list-item {
   list-style: none;

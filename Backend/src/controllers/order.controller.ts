@@ -15,8 +15,37 @@ export class OrderController {
     try {
       const { userId, items, total, address, phoneNumber, note, paymentStatus, status, provinceCode, provinceName, districtCode, districtName, wardCode, wardName } = req.body;
 
+      // ✅ Helper: Normalize province name (TP.HCM -> Thành phố Hồ Chí Minh)
+      const normalizeProvinceName = (name: string | undefined): string => {
+        if (!name) return '';
+        const normalized = name.trim();
+        // Map các tên viết tắt phổ biến
+        const provinceMap: Record<string, string> = {
+          'tp.hcm': 'Thành phố Hồ Chí Minh',
+          'tp hcm': 'Thành phố Hồ Chí Minh',
+          'hcm': 'Thành phố Hồ Chí Minh',
+          'sài gòn': 'Thành phố Hồ Chí Minh',
+          'saigon': 'Thành phố Hồ Chí Minh',
+          'hà nội': 'Thành phố Hà Nội',
+          'hanoi': 'Thành phố Hà Nội',
+          'hn': 'Thành phố Hà Nội',
+          'đà nẵng': 'Thành phố Đà Nẵng',
+          'danang': 'Thành phố Đà Nẵng',
+        };
+        
+        const lowerName = normalized.toLowerCase();
+        if (provinceMap[lowerName]) {
+          return provinceMap[lowerName];
+        }
+        
+        // Nếu đã là tên đầy đủ, giữ nguyên
+        return normalized;
+      };
+      
+      const normalizedProvinceName = normalizeProvinceName(provinceName);
+
       // Validate required fields
-      if (!userId || !items || !total || !address || !phoneNumber || !provinceCode || !provinceName || !districtCode || !districtName || !wardCode || !wardName) {
+      if (!userId || !items || !total || !address || !phoneNumber || !provinceCode || !normalizedProvinceName || !districtCode || !districtName || !wardCode || !wardName) {
         return res.status(400).json({
           status: 'error',
           message: 'Missing required fields'
@@ -42,7 +71,7 @@ export class OrderController {
           total,
           address,
           provinceCode,
-          provinceName,
+          provinceName: normalizedProvinceName,
           districtCode,
           districtName,
           wardCode,
@@ -295,8 +324,8 @@ export class OrderController {
             finalTotalValue: finalTotal,
             totalAmountType: typeof totalAmount,
             totalType: typeof total,
-            isNaN: isNaN(finalTotal),
-            isLessOrEqualZero: finalTotal <= 0
+            isNaN: finalTotal !== null && finalTotal !== undefined ? isNaN(finalTotal) : true,
+            isLessOrEqualZero: finalTotal !== null && finalTotal !== undefined ? finalTotal <= 0 : true
           }
         });
       }
@@ -312,6 +341,35 @@ export class OrderController {
       // Generate order code
       const orderCode = generateOrderCode(sequence.value);
 
+      // ✅ Helper: Normalize province name (TP.HCM -> Thành phố Hồ Chí Minh)
+      const normalizeProvinceName = (name: string | undefined): string => {
+        if (!name) return '';
+        const normalized = name.trim();
+        // Map các tên viết tắt phổ biến
+        const provinceMap: Record<string, string> = {
+          'tp.hcm': 'Thành phố Hồ Chí Minh',
+          'tp hcm': 'Thành phố Hồ Chí Minh',
+          'hcm': 'Thành phố Hồ Chí Minh',
+          'sài gòn': 'Thành phố Hồ Chí Minh',
+          'saigon': 'Thành phố Hồ Chí Minh',
+          'hà nội': 'Thành phố Hà Nội',
+          'hanoi': 'Thành phố Hà Nội',
+          'hn': 'Thành phố Hà Nội',
+          'đà nẵng': 'Thành phố Đà Nẵng',
+          'danang': 'Thành phố Đà Nẵng',
+        };
+        
+        const lowerName = normalized.toLowerCase();
+        if (provinceMap[lowerName]) {
+          return provinceMap[lowerName];
+        }
+        
+        // Nếu đã là tên đầy đủ, giữ nguyên
+        return normalized;
+      };
+      
+      const normalizedProvinceName = normalizeProvinceName(provinceName);
+      
       // Tạo order với default values cho các field không bắt buộc
       const order = await prisma.order.create({
         data: {
@@ -323,7 +381,7 @@ export class OrderController {
           address: address || 'Chưa có địa chỉ - Đơn từ chatbot',
           phoneNumber: phoneNumber || 'Chưa có số điện thoại',
           provinceCode: provinceCode || '',
-          provinceName: provinceName || '',
+          provinceName: normalizedProvinceName,
           districtCode: districtCode || '',
           districtName: districtName || '',
           wardCode: wardCode || '',

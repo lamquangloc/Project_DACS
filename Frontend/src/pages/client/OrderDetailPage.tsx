@@ -118,16 +118,17 @@ const OrderDetailPage: React.FC = () => {
         const res = await comboService.getById(comboId);
         // ✅ res là ApiResponse<Combo>, cần lấy res.data để có Combo object
         const combo = (res as any).data || res;
-        if (combo) {
+        if (combo && combo.name) {
+          // ✅ Lưu combo vào map kể cả khi không có image (sẽ dùng placeholder)
           console.log('✅ Fetched combo:', comboId, {
             name: combo.name,
-            image: combo.image,
+            image: combo.image || 'no image',
             hasName: !!combo.name,
             hasImage: !!combo.image
           });
           return { comboId, combo };
         } else {
-          console.warn('⚠️ Combo data is empty for comboId:', comboId);
+          console.warn('⚠️ Combo data is empty or missing name for comboId:', comboId, combo);
           return null;
         }
       } catch (e) {
@@ -179,12 +180,12 @@ const OrderDetailPage: React.FC = () => {
             label: 'Trạng thái đơn hàng',
             children: (
               <>
-                <div style={{ marginBottom: 8 }}>
-                  <b>Trạng thái đơn hàng:</b> <Tag color={statusColor[String(order.status) as keyof typeof statusColor]}>{statusText[String(order.status) as keyof typeof statusText]}</Tag>
-                </div>
-                <div>
-                  <b>Trạng thái thanh toán:</b> <Tag color={paymentColor[String(order.paymentStatus) as keyof typeof paymentColor]}>{paymentText[String(order.paymentStatus) as keyof typeof paymentText]}</Tag>
-                </div>
+          <div style={{ marginBottom: 8 }}>
+            <b>Trạng thái đơn hàng:</b> <Tag color={statusColor[String(order.status) as keyof typeof statusColor]}>{statusText[String(order.status) as keyof typeof statusText]}</Tag>
+          </div>
+          <div>
+            <b>Trạng thái thanh toán:</b> <Tag color={paymentColor[String(order.paymentStatus) as keyof typeof paymentColor]}>{paymentText[String(order.paymentStatus) as keyof typeof paymentText]}</Tag>
+          </div>
               </>
             )
           },
@@ -193,9 +194,9 @@ const OrderDetailPage: React.FC = () => {
             label: 'Thông tin đơn hàng',
             children: (
               <>
-                <div><b>Mã đơn hàng:</b> {order.orderCode}</div>
-                <div><b>Ngày đặt:</b> {formatDate(order.createdAt)}</div>
-                <div><b>Tổng tiền:</b> {formatCurrency(order.total)}</div>
+          <div><b>Mã đơn hàng:</b> {order.orderCode}</div>
+          <div><b>Ngày đặt:</b> {formatDate(order.createdAt)}</div>
+          <div><b>Tổng tiền:</b> {formatCurrency(order.total)}</div>
               </>
             )
           },
@@ -204,7 +205,7 @@ const OrderDetailPage: React.FC = () => {
             label: 'Chi tiết sản phẩm',
             children: (
               <>
-                {order.items.map((item: any) => {
+          {order.items.map((item: any) => {
                   // ✅ Lấy comboId từ item.comboId hoặc từ item.combo?.id
                   // ✅ Nếu không có comboId nhưng có productId và productId có thể là comboId bị nhầm
                   // → Kiểm tra xem productId có phải là comboId không (thử fetch combo với productId)
@@ -236,34 +237,22 @@ const OrderDetailPage: React.FC = () => {
                   // ✅ Nếu có comboId, luôn ưu tiên lấy từ itemDetails (đã fetch đầy đủ)
                   if (comboId) {
                     const fetchedCombo = itemDetails.get(comboId);
-                    console.log('🔍 Checking fetchedCombo for comboId:', comboId, 'found:', !!fetchedCombo, fetchedCombo);
+                    console.log('🔍 Checking fetchedCombo for comboId:', comboId, 'found:', !!fetchedCombo);
                     
-                    if (fetchedCombo) {
-                      // ✅ Ưu tiên dùng fetchedCombo nếu có đầy đủ thông tin
-                      if (fetchedCombo.name && fetchedCombo.image) {
-                        product = fetchedCombo;
-                        console.log('✅ Using fetched combo (full):', comboId, product.name, product.image);
-                      } else if (fetchedCombo.name) {
-                        // Có name nhưng chưa có image, vẫn dùng nhưng sẽ fallback
-                        product = { ...fetchedCombo, image: product.image || fetchedCombo.image || item.combo?.image };
-                        console.log('✅ Using fetched combo (name only):', comboId, product.name);
-                      } else if (fetchedCombo.image) {
-                        // Có image nhưng chưa có name
-                        product = { ...fetchedCombo, name: product.name || fetchedCombo.name || item.combo?.name };
-                        console.log('✅ Using fetched combo (image only):', comboId, product.image);
-                      } else {
-                        // Fetched nhưng không có name/image, dùng combo từ item
-                        product = item.combo || fetchedCombo;
-                        console.log('⚠️ Using item.combo as fallback:', comboId);
+                    if (fetchedCombo && fetchedCombo.name) {
+                      // ✅ Ưu tiên dùng fetchedCombo nếu có name (kể cả khi không có image)
+                      product = fetchedCombo;
+                      // Merge image từ item.combo nếu fetchedCombo không có image
+                      if (!product.image && item.combo?.image) {
+                        product = { ...product, image: item.combo.image };
                       }
+                      console.log('✅ Using fetched combo:', comboId, product.name, product.image || 'no image');
+                    } else if (item.combo && item.combo.name) {
+                      // Fallback: dùng combo từ item nếu có
+                      product = item.combo;
+                      console.log('⚠️ Using item.combo (not fetched yet):', comboId, product.name, product.image || 'no image');
                     } else {
-                      // Chưa fetch được, dùng combo từ item nếu có
-                      if (item.combo) {
-                        product = item.combo;
-                        console.log('⚠️ Using item.combo (not fetched yet):', comboId, product.name, product.image);
-                      } else {
-                        console.log('❌ Combo not found in itemDetails and no item.combo:', comboId, 'item:', item);
-                      }
+                      console.log('❌ Combo not found in itemDetails and no item.combo:', comboId, 'item:', item);
                     }
                   }
                   
@@ -284,16 +273,16 @@ const OrderDetailPage: React.FC = () => {
                   const productName = product.name || (isCombo ? 'Combo' : 'Sản phẩm');
                   console.log('📝 Final product name:', productName, 'isCombo:', isCombo);
                   
-                  return (
-                    <div key={item.id} style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+            return (
+              <div key={item.id} style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
                       <img src={imageUrl} alt={productName} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, marginRight: 16 }} />
-                      <div style={{ flex: 1 }}>
+                <div style={{ flex: 1 }}>
                         <div><b>{productName}</b></div>
-                        <div>Số lượng: {item.quantity} | Giá: {formatCurrency(item.price)} | Thành tiền: {formatCurrency(item.price * item.quantity)}</div>
-                      </div>
-                    </div>
-                  );
-                })}
+                  <div>Số lượng: {item.quantity} | Giá: {formatCurrency(item.price)} | Thành tiền: {formatCurrency(item.price * item.quantity)}</div>
+                </div>
+              </div>
+            );
+          })}
               </>
             )
           },
@@ -310,7 +299,6 @@ const OrderDetailPage: React.FC = () => {
                   order.districtName,
                   order.provinceName
                 ].filter(Boolean).join(', ')}</div>
-                <div><b>Ghi chú:</b> {order.note}</div>
               </>
             )
           }

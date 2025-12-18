@@ -64,12 +64,17 @@ const MyOrderPage: React.FC = () => {
     orders.forEach((order: any) => {
       if (order.items) {
         order.items.forEach((item: any) => {
-          if (item.comboId && !comboIds.includes(item.comboId)) {
-            comboIds.push(item.comboId);
+          // ✅ Lấy comboId từ item.comboId hoặc từ item.combo?.id
+          const comboId = item.comboId || item.combo?.id;
+          if (comboId && !comboIds.includes(comboId)) {
+            comboIds.push(comboId);
+            console.log('📦 Found comboId in order:', comboId, 'item:', item);
           }
         });
       }
     });
+    
+    console.log('📦 Total comboIds to fetch:', comboIds.length, comboIds);
     
     // Fetch combo details
     for (const comboId of comboIds) {
@@ -77,15 +82,25 @@ const MyOrderPage: React.FC = () => {
         const res = await comboService.getById(comboId);
         // ✅ res là ApiResponse<Combo>, cần lấy res.data để có Combo object
         const combo = (res as any).data || res;
-        if (combo && combo.name && combo.image) {
+        console.log('📦 Fetched combo from API:', comboId, {
+          hasCombo: !!combo,
+          name: combo?.name,
+          hasImage: !!combo?.image,
+          image: combo?.image
+        });
+        if (combo && combo.name) {
+          // ✅ Lưu combo vào map, kể cả khi không có image (sẽ dùng placeholder)
           detailsMap.set(comboId, combo);
-          console.log('✅ Fetched combo details:', comboId, combo.name, combo.image);
+          console.log('✅ Cached combo details:', comboId, combo.name, combo.image || 'no image');
+        } else {
+          console.warn('⚠️ Combo fetched but missing name:', comboId, combo);
         }
       } catch (e) {
-        console.error('Error fetching combo:', comboId, e);
+        console.error('❌ Error fetching combo:', comboId, e);
       }
     }
     
+    console.log('✅ Total combos cached:', detailsMap.size);
     setItemDetails(detailsMap);
   };
 
@@ -162,17 +177,34 @@ const MyOrderPage: React.FC = () => {
               </div>
               <div className="myorder-products">
                 {order.items.map((item: any) => {
-                  // ✅ Ưu tiên lấy từ itemDetails (đã fetch), sau đó từ item.product/combo, cuối cùng là empty object
+                  // ✅ Lấy comboId từ item.comboId hoặc từ item.combo?.id
+                  const comboId = item.comboId || item.combo?.id;
                   let product = item.product || item.combo || {};
+                  let isCombo = !!comboId;
+                  
+                  console.log('🎨 Rendering order item:', {
+                    itemId: item.id,
+                    comboId,
+                    productId: item.productId,
+                    hasComboObject: !!item.combo,
+                    hasProductObject: !!item.product,
+                    itemDetailsSize: itemDetails.size
+                  });
                   
                   // ✅ Nếu có comboId, luôn ưu tiên lấy từ itemDetails (đã fetch đầy đủ)
-                  if (item.comboId) {
-                    const fetchedCombo = itemDetails.get(item.comboId);
-                    if (fetchedCombo && fetchedCombo.name && fetchedCombo.image) {
+                  if (comboId) {
+                    const fetchedCombo = itemDetails.get(comboId);
+                    if (fetchedCombo && fetchedCombo.name) {
                       product = fetchedCombo;
-                    } else if (!product.name || !product.image) {
-                      // Nếu chưa fetch được, vẫn dùng product hiện tại nhưng sẽ fetch sau
-                      console.log('⚠️ Combo not fetched yet:', item.comboId, 'product:', product);
+                      isCombo = true;
+                      console.log('✅ Using fetched combo:', comboId, fetchedCombo.name);
+                    } else if (item.combo && item.combo.name) {
+                      // Fallback: dùng combo object từ order nếu có
+                      product = item.combo;
+                      isCombo = true;
+                      console.log('⚠️ Using combo from order object:', item.combo.name);
+                    } else {
+                      console.warn('⚠️ Combo not found in cache:', comboId, 'itemDetails keys:', Array.from(itemDetails.keys()));
                     }
                   }
                   
@@ -185,8 +217,12 @@ const MyOrderPage: React.FC = () => {
                     } else {
                       imageUrl = getImageUrl(product.image);
                     }
+                  } else if (isCombo) {
+                    // Nếu là combo nhưng không có image, thử fetch lại
+                    console.warn('⚠️ Combo has no image:', comboId, product.name);
                   }
-                  const productName = product.name || (item.comboId ? 'Combo' : 'Sản phẩm');
+                  
+                  const productName = product.name || (isCombo ? 'Combo' : 'Sản phẩm');
                   
                   return (
                     <div className="myorder-product" key={item.id}>

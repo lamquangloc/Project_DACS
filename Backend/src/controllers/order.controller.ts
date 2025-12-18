@@ -24,8 +24,37 @@ export class OrderController {
     try {
       const { userId, items, total, address, phoneNumber, note, paymentStatus, status, provinceCode, provinceName, districtCode, districtName, wardCode, wardName } = req.body;
 
+      // ✅ Helper: Normalize province name (TP.HCM -> Thành phố Hồ Chí Minh)
+      const normalizeProvinceName = (name: string | undefined): string => {
+        if (!name) return '';
+        const normalized = name.trim();
+        // Map các tên viết tắt phổ biến
+        const provinceMap: Record<string, string> = {
+          'tp.hcm': 'Thành phố Hồ Chí Minh',
+          'tp hcm': 'Thành phố Hồ Chí Minh',
+          'hcm': 'Thành phố Hồ Chí Minh',
+          'sài gòn': 'Thành phố Hồ Chí Minh',
+          'saigon': 'Thành phố Hồ Chí Minh',
+          'hà nội': 'Thành phố Hà Nội',
+          'hanoi': 'Thành phố Hà Nội',
+          'hn': 'Thành phố Hà Nội',
+          'đà nẵng': 'Thành phố Đà Nẵng',
+          'danang': 'Thành phố Đà Nẵng',
+        };
+        
+        const lowerName = normalized.toLowerCase();
+        if (provinceMap[lowerName]) {
+          return provinceMap[lowerName];
+        }
+        
+        // Nếu đã là tên đầy đủ, giữ nguyên
+        return normalized;
+      };
+      
+      const normalizedProvinceName = normalizeProvinceName(provinceName);
+
       // Validate required fields
-      if (!userId || !items || !total || !address || !phoneNumber || !provinceCode || !provinceName || !districtCode || !districtName || !wardCode || !wardName) {
+      if (!userId || !items || !total || !address || !phoneNumber || !provinceCode || !normalizedProvinceName || !districtCode || !districtName || !wardCode || !wardName) {
         return res.status(400).json({
           status: 'error',
           message: 'Missing required fields'
@@ -100,12 +129,12 @@ export class OrderController {
           userId,
           total,
           address,
-          provinceCode: finalProvinceCode,
-          provinceName: finalProvinceName,
-          districtCode: finalDistrictCode,
-          districtName: finalDistrictName,
-          wardCode: finalWardCode,
-          wardName: finalWardName,
+          provinceCode,
+          provinceName,
+          districtCode,
+          districtName,
+          wardCode,
+          wardName,
           phoneNumber,
           note,
           paymentStatus: paymentStatus || 'PENDING',
@@ -650,8 +679,8 @@ export class OrderController {
             finalTotalValue: finalTotal,
             totalAmountType: typeof totalAmount,
             totalType: typeof total,
-            isNaN: isNaN(finalTotal),
-            isLessOrEqualZero: finalTotal <= 0
+            isNaN: finalTotal !== null && finalTotal !== undefined ? isNaN(finalTotal) : true,
+            isLessOrEqualZero: finalTotal !== null && finalTotal !== undefined ? finalTotal <= 0 : true
           }
         });
       }
@@ -667,12 +696,6 @@ export class OrderController {
       // Generate order code
       const orderCode = generateOrderCode(sequence.value);
 
-      // Address chỉ chứa địa chỉ chi tiết (số nhà, tên đường) - không nối thêm ward/district/province
-      // Các phần ward/district/province đã được lưu riêng ở wardName, districtName, provinceName
-      const finalAddress = inputAddressDetail?.trim() || '';
-
-      const finalPhoneNumber = inputPhoneNumber || 'Chưa có số điện thoại';
-
       // Tạo order với default values cho các field không bắt buộc
       const order = await prisma.order.create({
         data: {
@@ -681,16 +704,15 @@ export class OrderController {
           userId,
           total: Number(finalTotal),
           // Default values cho chatbot orders (có thể cập nhật sau)
-          address: finalAddress || 'Chưa có địa chỉ - Đơn từ chatbot',
-          phoneNumber: finalPhoneNumber,
-          provinceCode: finalProvinceCode,
-          provinceName: finalProvinceName,
-          districtCode: finalDistrictCode,
-          districtName: finalDistrictName,
-          wardCode: finalWardCode,
-          wardName: finalWardName,
-          // ✅ Đơn giản hóa note: chỉ giữ note từ user (nếu có), không thêm thông tin session/source
-          note: note || 'Đơn từ chatbot',
+          address: address || 'Chưa có địa chỉ - Đơn từ chatbot',
+          phoneNumber: phoneNumber || 'Chưa có số điện thoại',
+          provinceCode: provinceCode || '',
+          provinceName: provinceName || '',
+          districtCode: districtCode || '',
+          districtName: districtName || '',
+          wardCode: wardCode || '',
+          wardName: wardName || '',
+          note: note || `Đơn từ chatbot${sessionId ? ` (session: ${sessionId})` : ''}${source ? ` - ${source}` : ''}`,
           paymentStatus: paymentStatus || 'PENDING',
           status: status || 'PENDING',
           items: {

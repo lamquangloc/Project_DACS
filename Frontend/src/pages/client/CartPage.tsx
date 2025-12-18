@@ -210,28 +210,65 @@ const CartPage: React.FC = () => {
       // ✅ Log cartItems để debug
       console.log('🛒 Cart items before creating order:', cartItems);
       
+      // ✅ Helper: Normalize province name (TP.HCM -> Thành phố Hồ Chí Minh)
+      const normalizeProvinceName = (name: string): string => {
+        if (!name) return name;
+        const normalized = name.trim();
+        // Map các tên viết tắt phổ biến
+        const provinceMap: Record<string, string> = {
+          'tp.hcm': 'Thành phố Hồ Chí Minh',
+          'tp hcm': 'Thành phố Hồ Chí Minh',
+          'hcm': 'Thành phố Hồ Chí Minh',
+          'sài gòn': 'Thành phố Hồ Chí Minh',
+          'saigon': 'Thành phố Hồ Chí Minh',
+          'hà nội': 'Thành phố Hà Nội',
+          'hanoi': 'Thành phố Hà Nội',
+          'hn': 'Thành phố Hà Nội',
+          'đà nẵng': 'Thành phố Đà Nẵng',
+          'danang': 'Thành phố Đà Nẵng',
+        };
+        
+        const lowerName = normalized.toLowerCase();
+        if (provinceMap[lowerName]) {
+          return provinceMap[lowerName];
+        }
+        
+        // Nếu đã là tên đầy đủ, giữ nguyên
+        return normalized;
+      };
+      
+      const normalizedProvinceName = normalizeProvinceName(provinceName);
+      
       const orderData = {
         userId,
         items: cartItems.map(item => {
-          if (item.product) {
-            const productId = item.product._id || item.product.id;
-            console.log('📦 Product item:', { productId, name: item.product.name, quantity: item.quantity });
-            return {
-              productId,
-              quantity: item.quantity,
-              price: item.product.price
-            };
-          } else if (item.combo) {
-            // ✅ Lấy comboId từ _id hoặc id
+          if (item.combo) {
+            // ✅ Đây là combo - ưu tiên kiểm tra combo trước
             const comboId = item.combo._id || item.combo.id;
             console.log('🍱 Combo item:', { comboId, name: item.combo.name, quantity: item.quantity, combo: item.combo });
             if (!comboId) {
               console.error('❌ Combo item missing ID!', item.combo);
+              return null;
             }
             return {
               comboId,
+              productId: null, // ✅ Đảm bảo productId là null cho combo
               quantity: item.quantity,
               price: item.combo.price
+            };
+          } else if (item.product) {
+            // ✅ Đây là product
+            const productId = item.product._id || item.product.id;
+            console.log('📦 Product item:', { productId, name: item.product.name, quantity: item.quantity });
+            if (!productId) {
+              console.error('❌ Product item missing ID!', item.product);
+              return null;
+            }
+            return {
+              productId,
+              comboId: null, // ✅ Đảm bảo comboId là null cho product
+              quantity: item.quantity,
+              price: item.product.price
             };
           }
           console.warn('⚠️ Item has neither product nor combo:', item);
@@ -244,7 +281,7 @@ const CartPage: React.FC = () => {
         paymentStatus: paymentMethod === 'VNPAY' ? 'PAID' : 'PENDING',
         status: 'PENDING',
         provinceCode: String(provinceCode),
-        provinceName,
+        provinceName: normalizedProvinceName,
         districtCode: String(districtCode),
         districtName,
         wardCode: String(wardCode),
@@ -398,11 +435,14 @@ const CartPage: React.FC = () => {
             </div>
           ) : (
             <>
-              {cartItems.map(item => {
-                const prod = item.product || item.combo;
-                if (!prod) return null;
-                return (
-                  <div key={prod._id} className="cart-item">
+              {cartItems
+                .filter(item => item.product || item.combo)
+                .map(item => {
+                  const prod = item.product || item.combo;
+                  if (!prod) return null;
+                  const itemId = item._id || prod._id || `${prod.name}-${item.quantity}`;
+                  return (
+                    <div key={itemId} className="cart-item">
                     <img src={prod.image} alt={prod.name} />
                     <div className="item-details">
                       <h3>{prod.name}</h3>

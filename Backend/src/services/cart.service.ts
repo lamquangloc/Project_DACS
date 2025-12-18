@@ -127,6 +127,32 @@ class CartService {
    */
   async addItemToCart(userId: string, item: CartItem): Promise<CartData> {
     try {
+      // ✅ Đảm bảo luôn có image cho sản phẩm/combo (tránh lỗi hình ảnh rỗng trên frontend)
+      try {
+        if (!item.image) {
+          if (item.productId) {
+            const product = await prisma.product.findUnique({
+              where: { id: item.productId },
+              select: { image: true },
+            });
+            if (product?.image) {
+              item.image = product.image;
+            }
+          } else if (item.comboId) {
+            const combo = await prisma.combo.findUnique({
+              where: { id: item.comboId },
+              select: { image: true },
+            });
+            if (combo?.image) {
+              item.image = combo.image;
+            }
+          }
+        }
+      } catch (imageError) {
+        console.warn('⚠️ Failed to enrich cart item image from database:', imageError);
+        // Không chặn flow nếu chỉ lỗi ảnh
+      }
+
       const currentCart = await this.getCart(userId);
       
       // ✅ Tìm item đã có trong cart - so sánh cả productId và comboId

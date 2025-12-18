@@ -35,7 +35,8 @@ const MenuPage: React.FC = () => {
 
   // Fetch categories từ backend và lọc đúng 10 id, kiểm tra cats là mảng
   useEffect(() => {
-    fetch('/api/categories')
+    // ✅ Lấy nhiều hơn 10 danh mục để đảm bảo không bị thiếu (ví dụ khi có thêm category mới)
+    fetch('/api/categories?page=1&limit=100')
       .then(res => res.json())
       .then(data => {
         let cats = [];
@@ -45,12 +46,62 @@ const MenuPage: React.FC = () => {
           cats = data.data.categories;
         }
         console.log('CATEGORIES FROM API:', cats);
+        
+        // ✅ Sửa logic filter để check cả id và _id (vì backend có thể trả về _id)
         const filtered = CATEGORY_IDS
-          .map(id => cats.find((c: any) => c.id === id))
+          .map(id => {
+            // Tìm category theo ID (check cả id và _id)
+            let found = cats.find((c: any) => (c.id === id) || (c._id === id));
+            
+            // ✅ Nếu không tìm thấy, thử tìm theo tên (fallback cho danh mục "Gà")
+            if (!found) {
+              const categoryNames: Record<string, string> = {
+                '6805deae0d9964f846624745': 'Khai vị',
+                '6805ded60d9964f846624746': 'Canh',
+                '6802387061cabb678ca1f61c': 'Rau',
+                '6805defa0d9964f846624747': 'Hải sản',
+                '6802381861cabb678ca1f617': 'Gà',
+                '6805df420d9964f846624748': 'Bò',
+                '6805df620d9964f846624749': 'Heo',
+                '6805df7e0d9964f84662474a': 'Cơm',
+                '6802383e61cabb678ca1f619': 'Lẩu',
+                '6805dfb70d9964f84662474b': 'Thêm',
+              };
+              const categoryName = categoryNames[id];
+              if (categoryName) {
+                found = cats.find((c: any) => 
+                  c.name?.toLowerCase().includes(categoryName.toLowerCase()) ||
+                  categoryName.toLowerCase().includes(c.name?.toLowerCase() || '')
+                );
+                if (found) {
+                  console.log(`✅ Tìm thấy danh mục "${categoryName}" bằng tên:`, found);
+                }
+              }
+            }
+            
+            return found;
+          })
           .filter(Boolean);
+        
         console.log('FILTERED CATEGORIES:', filtered);
+        const missingIds = CATEGORY_IDS.filter(id => 
+          !filtered.find((c: any) => (c.id === id) || (c._id === id))
+        );
+        if (missingIds.length > 0) {
+          console.warn('⚠️ MISSING CATEGORY IDS:', missingIds);
+          // Log tất cả categories để debug
+          console.log('ALL CATEGORIES FROM API:', cats.map((c: any) => ({ 
+            id: c.id, 
+            _id: c._id, 
+            name: c.name 
+          })));
+        }
+        
         setCategories(filtered);
         if (filtered.length > 0) setSelectedCat(filtered[0]);
+      })
+      .catch(error => {
+        console.error('Error fetching categories:', error);
       });
   }, []);
 

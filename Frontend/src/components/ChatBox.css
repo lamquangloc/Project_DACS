@@ -462,7 +462,7 @@
 }
 
 .message.ai .message-text strong {
-  color: #1976d2;
+  color: #000; /* Đổi màu chữ strong thành đen (đặc biệt cho "SỐ ĐIỆN THOẠI") */
 }
 
 .message-text em {
@@ -565,6 +565,11 @@
 
 .message.ai .message-text {
   color: #222;
+}
+
+/* ✅ Đổi màu chữ yêu cầu nhập số điện thoại thành đen */
+.message.ai .message-text p strong {
+  color: #000;
 }
 
 .message.user .message-text {

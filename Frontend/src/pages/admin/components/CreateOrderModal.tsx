@@ -75,25 +75,31 @@ const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
 
   // Fetch provinces on mount
   useEffect(() => {
-    fetch('https://provinces.open-api.vn/api/p/')
-      .then(res => res.json())
-      .then(data => setProvinceList(data));
+    // Use new API open.oapi.vn
+    import('../../../utils/oapi-vn').then(({ getProvinces }) => {
+      getProvinces().then(data => setProvinceList(data));
+    });
   }, []);
 
   // Fetch districts when province changes
   useEffect(() => {
     if (provinceCode) {
       setLoadingAddress(true);
-      fetch(`https://provinces.open-api.vn/api/p/${provinceCode}?depth=2`)
-        .then(res => res.json())
-        .then(data => {
-          setDistrictList(data.districts || []);
-          setProvinceName(data.name);
+      // Use new API open.oapi.vn
+      import('../../../utils/oapi-vn').then(({ getDistrictsByProvinceId }) => {
+        getDistrictsByProvinceId(provinceCode).then(districts => {
+          setDistrictList(districts);
+          // Find province name from provinceList
+          const province = provinceList.find(p => p.id === provinceCode);
+          if (province) {
+            setProvinceName(province.name);
+          }
           setDistrictCode('');
           setWardCode('');
           setWardList([]);
           setLoadingAddress(false);
         });
+      });
     } else {
       setDistrictList([]);
       setDistrictCode('');
@@ -106,14 +112,19 @@ const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   useEffect(() => {
     if (districtCode) {
       setLoadingAddress(true);
-      fetch(`https://provinces.open-api.vn/api/d/${districtCode}?depth=2`)
-        .then(res => res.json())
-        .then(data => {
-          setWardList(data.wards || []);
-          setDistrictName(data.name);
+      // Use new API open.oapi.vn
+      import('../../../utils/oapi-vn').then(({ getWardsByDistrictId }) => {
+        getWardsByDistrictId(districtCode).then(wards => {
+          setWardList(wards);
+          // Find district name from districtList
+          const district = districtList.find(d => d.id === districtCode);
+          if (district) {
+            setDistrictName(district.name);
+          }
           setWardCode('');
           setLoadingAddress(false);
         });
+      });
     } else {
       setWardList([]);
       setWardCode('');
@@ -279,7 +290,7 @@ const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
         wardCode,
         wardName,
         wardList,
-        selectedWard: wardList.find(w => String(w.code) === String(wardCode))
+        selectedWard: wardList.find(w => String(w.id) === String(wardCode))
       });
       if (!selectedUser || selectedItems.length === 0) {
         message.error('Vui lòng chọn khách hàng và thêm sản phẩm');
@@ -439,7 +450,7 @@ const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               value={provinceCode || undefined}
               onChange={value => {
                 setProvinceCode(String(value));
-                const selected = provinceList.find(p => String(p.code) === String(value));
+                const selected = provinceList.find(p => String(p.id) === String(value));
                 setProvinceName(selected ? selected.name : '');
                 setDistrictCode('');
                 setDistrictName('');
@@ -450,7 +461,7 @@ const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               optionFilterProp="children"
             >
               {provinceList.map((p) => (
-                <Option key={p.code} value={String(p.code)}>{p.name}</Option>
+                <Option key={p.id} value={String(p.id)}>{p.name}</Option>
               ))}
             </Select>
             <Select
@@ -459,7 +470,7 @@ const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               value={districtCode || undefined}
               onChange={value => {
                 setDistrictCode(String(value));
-                const selected = districtList.find(d => String(d.code) === String(value));
+                const selected = districtList.find(d => String(d.id) === String(value));
                 setDistrictName(selected ? selected.name : '');
                 setWardCode('');
                 setWardName('');
@@ -469,7 +480,7 @@ const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               optionFilterProp="children"
             >
               {districtList.map((d) => (
-                <Option key={d.code} value={String(d.code)}>{d.name}</Option>
+                <Option key={d.id} value={String(d.id)}>{d.name}</Option>
               ))}
             </Select>
             <Select
@@ -478,7 +489,7 @@ const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               value={wardCode || undefined}
               onChange={value => {
                 setWardCode(String(value));
-                const selected = wardList.find(w => String(w.code) === String(value) || w.code === value);
+                const selected = wardList.find(w => String(w.id) === String(value) || w.id === value);
                 if (selected && selected.name) {
                   setWardName(selected.name);
                 } else {
@@ -490,7 +501,7 @@ const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               optionFilterProp="children"
             >
               {wardList.map((w) => (
-                <Option key={w.code} value={String(w.code)}>{w.name}</Option>
+                <Option key={w.id} value={String(w.id)}>{w.name}</Option>
               ))}
             </Select>
             <Input

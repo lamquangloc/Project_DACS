@@ -310,6 +310,7 @@ const OrderDetailPage: React.FC = () => {
                   order.districtName,
                   order.provinceName
                 ].filter(Boolean).join(', ')}</div>
+                <div><b>Ghi chú:</b> {order.note}</div>
               </>
             )
           }

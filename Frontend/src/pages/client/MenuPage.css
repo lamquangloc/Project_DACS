@@ -9,16 +9,17 @@
 .menu-categories {
   display: flex;
   justify-content: center;
-  gap: 36px;
+  gap: 24px; /* giảm gap để đủ 10 danh mục trên 1 hàng ở desktop */
   margin-bottom: 18px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap; /* Desktop: giữ tất cả danh mục trên 1 hàng */
+  overflow-x: auto;  /* Nếu chiều rộng không đủ thì cho scroll ngang nhẹ */
 }
 .menu-category {
   display: flex;
   flex-direction: column;
   align-items: center;
   cursor: pointer;
-  min-width: 90px;
+  min-width: 80px; /* thu nhỏ một chút để fit 10 mục */
   position: relative;
   transition: transform 0.15s;
 }
@@ -207,5 +208,8 @@
   }
   .menu-categories {
     gap: 18px;
+    flex-wrap: wrap;       /* Mobile: cho phép xuống hàng để dễ nhìn */
+    justify-content: center;
+    overflow-x: visible;
   }
 } 

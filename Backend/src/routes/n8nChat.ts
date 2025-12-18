@@ -4,6 +4,7 @@
  */
 import express from 'express';
 import n8nService from '../services/n8n.service';
+import { OrderService } from '../services/order.service';
 
 const router = express.Router();
 
@@ -42,6 +43,74 @@ router.post('/chat', async (req, res) => {
       });
     }
 
+    // ✅ XỬ LÝ ĐẶC BIỆT: Nếu user yêu cầu "xem đơn hàng" → tự động lấy chi tiết đơn từ database
+    const viewOrderPattern = /(?:xem|chi\s+tiết|thông\s+tin|kiểm\s+tra).*?(?:đơn|order).*?(?:ORD-[\d-]+|[\d]{1,4})/i;
+    const orderCodeMatch = messageText.match(/(?:ORD-[\d-]+|[\d]{1,4})/i);
+    
+    if (viewOrderPattern.test(messageText) && orderCodeMatch) {
+      try {
+        const orderCodeOrSuffix = orderCodeMatch[0].trim();
+        console.log('🔍 Detected "view order" request, fetching order:', orderCodeOrSuffix);
+        
+        const order = await OrderService.getOrderByCode(orderCodeOrSuffix, userId);
+        
+        if (!order) {
+          return res.json({
+            reply: `Xin lỗi, không tìm thấy đơn hàng với mã "${orderCodeOrSuffix}". Vui lòng kiểm tra lại mã đơn hàng.`,
+            context: null,
+            cart: null,
+            order: null,
+            sessionId: sessionId,
+            metadata: null
+          });
+        }
+
+        // Reply ngắn gọn, để frontend hiển thị khung chi tiết đơn hàng
+        const reply = `Đây là đơn hàng của bạn, hãy xem lại nếu muốn.`;
+
+        console.log('✅ Order found, returning order details:', {
+          orderCode: order.orderCode,
+          total: order.total,
+          itemsCount: order.items.length
+        });
+
+        return res.json({
+          reply,
+          context: null,
+          cart: null,
+          order: {
+            id: order.id,
+            orderCode: order.orderCode,
+            userId: order.userId,
+            items: order.items,
+            total: order.total,
+            status: order.status,
+            paymentStatus: order.paymentStatus,
+            address: order.address,
+            phoneNumber: order.phoneNumber,
+            provinceCode: order.provinceCode,
+            provinceName: order.provinceName,
+            districtCode: order.districtCode,
+            districtName: order.districtName,
+            wardCode: order.wardCode,
+            wardName: order.wardName,
+            note: order.note,
+            createdAt: order.createdAt,
+            qrCode: null // Không có QR code cho đơn cũ
+          },
+          sessionId: sessionId,
+          metadata: {
+            source: 'backend-direct',
+            action: 'view_order',
+            orderCode: order.orderCode
+          }
+        });
+      } catch (error) {
+        console.error('❌ Error fetching order by code:', error);
+        // Nếu lỗi, tiếp tục gửi request tới N8N như bình thường
+      }
+    }
+
     // ✅ Extract cart từ request body (có thể ở root hoặc trong context)
     const cartData = req.body.cart || context?.cart || null;
     
@@ -74,19 +143,57 @@ router.post('/chat', async (req, res) => {
       hasContext: !!response.context,
       hasCart: !!response.cart, // Log để debug
       cartItemsCount: response.cart?.items?.length || 0,
+      hasOrder: !!response.order, // ✅ Log order data
+      hasQrCode: !!response.order?.qrCode?.qrCodeUrl, // ✅ Log QR code
       sessionId: response.sessionId
+    });
+
+    // ⚠️ CỰC KỲ QUAN TRỌNG: Đảm bảo reply KHÔNG rỗng
+    let finalReply = response.reply || 'Xin lỗi, tôi không thể trả lời ngay bây giờ.';
+    
+    // Kiểm tra nếu reply rỗng hoặc chỉ có khoảng trắng
+    if (!finalReply || finalReply.trim() === '') {
+      console.error('❌ Reply is EMPTY in route handler! Using fallback message.');
+      finalReply = 'Đã thêm món vào giỏ hàng thành công.';
+    }
+    
+    // Log final reply để debug
+    console.log('📝 Final reply in route handler:', {
+      length: finalReply.length,
+      preview: finalReply.substring(0, 150),
+      isEmpty: finalReply.trim() === '',
+      first50Chars: finalReply.substring(0, 50),
+      last50Chars: finalReply.substring(Math.max(0, finalReply.length - 50))
     });
 
     // Ensure response has required fields
     const formattedResponse = {
-      reply: response.reply || 'Xin lỗi, tôi không thể trả lời ngay bây giờ.',
+      reply: finalReply, // Đảm bảo KHÔNG rỗng
       context: response.context || null,
       cart: response.cart || null, // Forward cart data để frontend sync
+      order: response.order || null, // ✅ Forward order data để frontend hiển thị QR code
       sessionId: response.sessionId || sessionId,
       metadata: response.metadata || null
     };
 
-    console.log('✅ Sending response to client');
+    console.log('✅ Sending response to client:', {
+      replyLength: formattedResponse.reply.length,
+      replyPreview: formattedResponse.reply.substring(0, 100),
+      hasCart: !!formattedResponse.cart,
+      cartItemsCount: formattedResponse.cart?.items?.length || 0,
+      hasOrder: !!formattedResponse.order, // ✅ Log order data
+      hasQrCode: !!formattedResponse.order?.qrCode?.qrCodeUrl, // ✅ Log QR code
+      replyType: typeof formattedResponse.reply,
+      replyIsEmpty: !formattedResponse.reply || formattedResponse.reply.trim() === ''
+    });
+    
+    // ⚠️ QUAN TRỌNG: Log toàn bộ response để debug
+    console.log('📤 Full response being sent:', JSON.stringify({
+      reply: formattedResponse.reply.substring(0, 200),
+      hasCart: !!formattedResponse.cart,
+      cartItemsCount: formattedResponse.cart?.items?.length || 0
+    }, null, 2));
+    
     return res.json(formattedResponse);
   } catch (error) {
     console.error('N8N Chat error:', error);

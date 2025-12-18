@@ -18,6 +18,7 @@ import unitRoutes from './routes/unitRoutes';
 import dashboardRoutes from './routes/dashboard.route';
 import n8nChatRoutes from './routes/n8nChat';
 import cartRoutes from './routes/cart.routes';
+import paymentRoutes from './routes/payment.routes';
 
 const aiChatRoutes = require('./routes/aiChat');
 const app = express();
@@ -70,7 +71,7 @@ app.use('/api/admin', isAuthenticated, isAdminOrStaff, adminRoutes);
 app.use('/api/cart', isAuthenticated, cartRoutes);
 app.use('/api/units', unitRoutes);
 app.use('/api/dashboard', dashboardRoutes);
-
+app.use('/api/payments', isAuthenticated, paymentRoutes);
 // Error handling
 app.use(errorHandler);
 

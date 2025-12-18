@@ -15,6 +15,10 @@ router.post('/chatbot', chatBotAuth, OrderController.createOrderFromChatbot);
 router.post('/', isAuthenticated, OrderController.createOrder);
 router.get('/me', isAuthenticated, OrderController.getMyOrders);
 router.get('/me/:id', isAuthenticated, OrderController.getMyOrderById);
+router.get('/:id/qr-code', isAuthenticated, OrderController.getOrderQRCode);
+// Tìm đơn hàng theo mã đơn (full hoặc 4 số cuối) - User có thể tra cứu đơn của mình
+router.get('/search/:orderCodeOrSuffix', isAuthenticated, OrderController.getOrderByCode);
+router.get('/by-code/:orderCodeOrSuffix', isAuthenticated, OrderController.getOrderByCode);
 
 // Protected routes (Admin)
 router.get('/', isAuthenticated, isAdmin, OrderController.getAllOrders);

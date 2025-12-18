@@ -48,9 +48,10 @@ const CartPage: React.FC = () => {
 
   useEffect(() => {
     fetchCart();
-    fetch('https://provinces.open-api.vn/api/p/')
-      .then(res => res.json())
-      .then(data => setProvinceList(data));
+    // Use new API open.oapi.vn
+    import('../../utils/oapi-vn').then(({ getProvinces }) => {
+      getProvinces().then(data => setProvinceList(data));
+    });
     // Tự động điền tên người đặt nếu đã đăng nhập
     try {
       const user = JSON.parse(localStorage.getItem('user') || 'null');
@@ -82,15 +83,20 @@ const CartPage: React.FC = () => {
 
   useEffect(() => {
     if (provinceCode) {
-      fetch(`https://provinces.open-api.vn/api/p/${provinceCode}?depth=2`)
-        .then(res => res.json())
-        .then(data => {
-          setDistrictList(data.districts || []);
-          setProvinceName(data.name);
+      // Use new API open.oapi.vn
+      import('../../utils/oapi-vn').then(({ getDistrictsByProvinceId }) => {
+        getDistrictsByProvinceId(provinceCode).then(districts => {
+          setDistrictList(districts);
+          // Find province name from provinceList
+          const province = provinceList.find(p => p.id === provinceCode);
+          if (province) {
+            setProvinceName(province.name);
+          }
           setDistrictCode('');
           setWardCode('');
           setWardList([]);
         });
+      });
     } else {
       setDistrictList([]);
       setDistrictCode('');
@@ -101,13 +107,18 @@ const CartPage: React.FC = () => {
 
   useEffect(() => {
     if (districtCode) {
-      fetch(`https://provinces.open-api.vn/api/d/${districtCode}?depth=2`)
-        .then(res => res.json())
-        .then(data => {
-          setWardList(data.wards || []);
-          setDistrictName(data.name);
+      // Use new API open.oapi.vn
+      import('../../utils/oapi-vn').then(({ getWardsByDistrictId }) => {
+        getWardsByDistrictId(districtCode).then(wards => {
+          setWardList(wards);
+          // Find district name from districtList
+          const district = districtList.find(d => d.id === districtCode);
+          if (district) {
+            setDistrictName(district.name);
+          }
           setWardCode('');
         });
+      });
     } else {
       setWardList([]);
       setWardCode('');
@@ -116,7 +127,7 @@ const CartPage: React.FC = () => {
 
   useEffect(() => {
     if (wardCode && wardList.length > 0) {
-      const ward = wardList.find(w => String(w.code) === String(wardCode));
+      const ward = wardList.find(w => String(w.id) === String(wardCode));
       setWardName(ward ? ward.name : '');
     } else {
       setWardName('');
@@ -328,7 +339,7 @@ const CartPage: React.FC = () => {
             <select value={provinceCode} onChange={e => setProvinceCode(e.target.value)}>
               <option value="">Chọn tỉnh/thành phố</option>
               {provinceList.map(p => (
-                <option key={p.code} value={p.code}>{p.name}</option>
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
           </div>
@@ -337,7 +348,7 @@ const CartPage: React.FC = () => {
             <select value={districtCode} onChange={e => setDistrictCode(e.target.value)} disabled={!provinceCode}>
               <option value="">Chọn quận/huyện</option>
               {districtList.map(d => (
-                <option key={d.code} value={d.code}>{d.name}</option>
+                <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </select>
           </div>
@@ -346,7 +357,7 @@ const CartPage: React.FC = () => {
             <select value={wardCode} onChange={e => setWardCode(e.target.value)} disabled={!districtCode}>
               <option value="">Chọn phường/xã</option>
               {wardList.map(w => (
-                <option key={w.code} value={w.code}>{w.name}</option>
+                <option key={w.id} value={w.id}>{w.name}</option>
               ))}
             </select>
           </div>

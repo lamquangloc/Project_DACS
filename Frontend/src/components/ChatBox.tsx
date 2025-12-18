@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FaShoppingCart, FaInfoCircle, FaComments, FaTimes, FaReceipt, FaCalendarAlt, FaUser, FaUserEdit, FaPhone, FaMapMarkerAlt, FaStickyNote } from 'react-icons/fa';
 import { useNavigate, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
@@ -27,10 +27,42 @@ interface ChatContext {
   orderInfo?: string;
 }
 
+interface QRCodeData {
+  qrCodeUrl: string;
+  qrDataUrl?: string;
+  qrContent?: string;
+}
+
+interface OrderData {
+  id?: string;
+  orderCode?: string;
+  total?: number;
+  qrCode?: QRCodeData;
+  paymentStatus?: string; // PENDING, PAID, FAILED
+  status?: string; // PENDING, CONFIRMED, DELIVERING, DELIVERED, CANCELLED
+  items?: Array<{
+    id?: string;
+    name?: string;
+    price?: number;
+    quantity?: number;
+    image?: string;
+    product?: any;
+    combo?: any;
+  }>;
+  phoneNumber?: string;
+  address?: string;
+  provinceName?: string;
+  districtName?: string;
+  wardName?: string;
+  note?: string;
+  createdAt?: string;
+}
+
 interface Message {
   text: string;
   isUser: boolean;
   context?: ChatContext;
+  orderData?: OrderData; // ✅ Thêm order data để hiển thị QR code
 }
 
 const getUserId = () => {
@@ -154,6 +186,533 @@ const FAQ_QUESTIONS = [
   "Thực đơn combo của bạn?",
 ];
 
+/**
+ * Component hiển thị QR code thanh toán với polling và nút xác nhận
+ */
+interface QRCodePaymentCardProps {
+  orderData: OrderData;
+  onPaymentConfirmed: (orderData: OrderData) => void;
+}
+
+// ✅ Component hiển thị thông tin đơn hàng (khi tra cứu đơn hàng)
+interface OrderInfoCardProps {
+  orderData: OrderData;
+}
+
+const OrderInfoCard: React.FC<OrderInfoCardProps> = ({ orderData }) => {
+  const navigate = useNavigate();
+
+  const getStatusText = (status?: string) => {
+    switch (status) {
+      case 'PENDING': return 'Đang chờ';
+      case 'CONFIRMED': return 'Đã xác nhận';
+      case 'DELIVERING': return 'Đang giao';
+      case 'DELIVERED': return 'Đã giao';
+      case 'CANCELLED': return 'Đã hủy';
+      default: return status || 'N/A';
+    }
+  };
+
+  const getStatusColor = (status?: string) => {
+    switch (status) {
+      case 'PENDING': return '#faad14';
+      case 'CONFIRMED': return '#1890ff';
+      case 'DELIVERING': return '#722ed1';
+      case 'DELIVERED': return '#52c41a';
+      case 'CANCELLED': return '#ff4d4f';
+      default: return '#999';
+    }
+  };
+
+  const getPaymentStatusText = (paymentStatus?: string) => {
+    switch (paymentStatus) {
+      case 'PENDING': return 'Chưa thanh toán';
+      case 'PAID': return 'Đã thanh toán';
+      case 'FAILED': return 'Thanh toán thất bại';
+      default: return paymentStatus || 'N/A';
+    }
+  };
+
+  const getPaymentStatusColor = (paymentStatus?: string) => {
+    switch (paymentStatus) {
+      case 'PENDING': return '#faad14';
+      case 'PAID': return '#52c41a';
+      case 'FAILED': return '#ff4d4f';
+      default: return '#999';
+    }
+  };
+
+  const handleViewDetail = () => {
+    if (orderData.id) {
+      // Navigate to order detail page (client side)
+      navigate(`/profile/order/${orderData.id}`);
+    }
+  };
+
+  // ✅ Helper để render product card cho item
+  const renderOrderItemCard = (item: any, index: number) => {
+    // ✅ Lấy thông tin từ nhiều nguồn (item trực tiếp, product, combo)
+    const itemName = item.name || item.product?.name || item.combo?.name || 'N/A';
+    const itemPrice = item.price || item.product?.price || item.combo?.price || 0;
+    const itemImage = item.image || item.product?.image || item.combo?.image || null;
+    const itemQuantity = item.quantity || 1;
+    const productId = item.productId || item.product?.id || item.product?._id;
+    const comboId = item.comboId || item.combo?.id || item.combo?._id;
+    
+    // ✅ Lấy image URL với fallback
+    let imageUrl: string | null = null;
+    if (itemImage) {
+      imageUrl = getImageUrl(itemImage);
+    } else if (productId) {
+      // Nếu không có image nhưng có productId, có thể fetch sau (tùy chọn)
+      // Hiện tại chỉ hiển thị placeholder
+    } else if (comboId) {
+      // Nếu không có image nhưng có comboId, có thể fetch sau (tùy chọn)
+      // Hiện tại chỉ hiển thị placeholder
+    }
+
+    return (
+      <div
+        key={index}
+        className="product-list-item"
+        style={{
+          marginBottom: '8px',
+        }}
+      >
+        <div className="product-card-inline">
+          <div className="product-card-image-wrapper">
+            {imageUrl ? (
+              <img 
+                src={imageUrl} 
+                alt={itemName}
+                className="product-card-image"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+                loading="lazy"
+              />
+            ) : (
+              <div className="product-card-placeholder">
+                <span style={{ fontSize: '32px', opacity: 0.3 }}>🍽️</span>
+              </div>
+            )}
+          </div>
+          <div className="product-card-content">
+            <span className="product-card-name">
+              {itemName}
+            </span>
+            <span className="product-card-price">
+              {itemPrice.toLocaleString('vi-VN')}₫ x {itemQuantity}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div
+      style={{
+        border: '1px solid #e0e0e0',
+        borderRadius: '12px',
+        padding: '16px',
+        marginTop: '12px',
+        backgroundColor: '#fafafa',
+        maxWidth: '100%',
+      }}
+    >
+      <div style={{ marginBottom: '12px' }}>
+        <h4 style={{ margin: 0, marginBottom: '12px', color: '#333', fontSize: '16px', fontWeight: '600' }}>
+          Thông tin đơn hàng
+        </h4>
+        <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+          <strong>Mã đơn hàng:</strong> <code style={{ background: '#f0f0f0', padding: '2px 6px', borderRadius: '4px' }}>{orderData.orderCode || 'N/A'}</code>
+        </div>
+        <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+          <strong>Trạng thái đơn hàng:</strong>{' '}
+          <span
+            style={{
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              fontWeight: '500',
+              backgroundColor: getStatusColor(orderData.status) + '20',
+              color: getStatusColor(orderData.status),
+            }}
+          >
+            {getStatusText(orderData.status)}
+          </span>
+        </div>
+        <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+          <strong>Trạng thái thanh toán:</strong>{' '}
+          <span
+            style={{
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              fontWeight: '500',
+              backgroundColor: getPaymentStatusColor(orderData.paymentStatus) + '20',
+              color: getPaymentStatusColor(orderData.paymentStatus),
+            }}
+          >
+            {getPaymentStatusText(orderData.paymentStatus)}
+          </span>
+        </div>
+        <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+          <strong>Tổng cộng:</strong> {orderData.total?.toLocaleString('vi-VN')}₫
+        </div>
+        {orderData.createdAt && (
+          <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+            <strong>Ngày đặt:</strong> {new Date(orderData.createdAt).toLocaleString('vi-VN')}
+          </div>
+        )}
+        {orderData.phoneNumber && (
+          <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+            <strong>Số điện thoại:</strong> {orderData.phoneNumber}
+          </div>
+        )}
+        {orderData.address && (
+          <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+            <strong>Địa chỉ:</strong>{' '}
+            {[
+              orderData.address,
+              orderData.wardName,
+              orderData.districtName,
+              orderData.provinceName,
+            ]
+              .filter(Boolean)
+              .join(', ')}
+          </div>
+        )}
+        {orderData.note && (
+          <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+            <strong>Ghi chú:</strong> {orderData.note}
+          </div>
+        )}
+      </div>
+
+      {orderData.items && orderData.items.length > 0 && (
+        <div style={{ marginBottom: '12px' }}>
+          <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '8px', color: '#333' }}>
+            Danh sách món:
+          </div>
+          <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+            {orderData.items.map((item, index) => renderOrderItemCard(item, index))}
+          </div>
+        </div>
+      )}
+
+      {orderData.id && (
+        <button
+          onClick={handleViewDetail}
+          style={{
+            width: '100%',
+            padding: '10px 16px',
+            backgroundColor: '#1890ff',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '6px',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            transition: 'background-color 0.2s',
+            marginTop: '8px',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#40a9ff';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = '#1890ff';
+          }}
+        >
+          Xem chi tiết đơn hàng
+        </button>
+      )}
+    </div>
+  );
+};
+
+const QRCodePaymentCard: React.FC<QRCodePaymentCardProps> = ({ orderData, onPaymentConfirmed }) => {
+  const [paymentStatus, setPaymentStatus] = useState<string>(orderData.paymentStatus || 'PENDING');
+  const [isChecking, setIsChecking] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const token = localStorage.getItem('token');
+
+  // ✅ Polling tự động để kiểm tra trạng thái thanh toán
+  useEffect(() => {
+    if (!orderData.id || paymentStatus === 'PAID') {
+      // Dừng polling nếu đã thanh toán hoặc không có orderId
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+      return;
+    }
+
+    // ⚠️ QUAN TRỌNG: Clear interval cũ trước khi tạo mới (tránh multiple intervals)
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
+    let shouldStopPolling = false; // Flag để dừng polling khi order không tồn tại
+
+    const checkPaymentStatus = async () => {
+      // Tránh gọi đồng thời bằng cách check isChecking
+      if (isChecking || shouldStopPolling) {
+        console.log('⏸️ Payment check already in progress or stopped, skipping...');
+        return;
+      }
+      
+      try {
+        setIsChecking(true);
+        const response = await fetch(`${API_URL}/api/payments/status/${orderData.id}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          
+          // ⚠️ QUAN TRỌNG: Kiểm tra nếu order không tồn tại
+          if (!data.success || !data.data) {
+            console.error('❌ Order not found or invalid:', orderData.id);
+            message.error('Đơn hàng không tồn tại. Vui lòng kiểm tra lại mã đơn hàng.');
+            shouldStopPolling = true;
+            // Dừng polling ngay lập tức
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            return;
+          }
+
+          const newStatus = data.data.paymentStatus;
+          setPaymentStatus(newStatus);
+          
+          if (newStatus === 'PAID') {
+            // Dừng polling khi đã thanh toán
+            shouldStopPolling = true;
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            // Cập nhật orderData và gọi callback
+            const updatedOrderData = { ...orderData, paymentStatus: 'PAID' };
+            onPaymentConfirmed(updatedOrderData);
+            message.success('Thanh toán thành công!');
+          }
+        } else if (response.status === 404) {
+          // ⚠️ QUAN TRỌNG: Nếu order không tồn tại (404), dừng polling ngay
+          console.error('❌ Order not found (404):', orderData.id);
+          message.error('Đơn hàng không tồn tại. Vui lòng kiểm tra lại mã đơn hàng.');
+          shouldStopPolling = true;
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+        }
+      } catch (error) {
+        console.error('Error checking payment status:', error);
+        // ⚠️ Nếu lỗi network hoặc lỗi khác, vẫn tiếp tục polling (có thể là tạm thời)
+        // Chỉ dừng nếu lỗi rõ ràng là order không tồn tại
+      } finally {
+        setIsChecking(false);
+      }
+    };
+
+    // Kiểm tra ngay lập tức (chỉ 1 lần)
+    checkPaymentStatus();
+
+    // Polling mỗi 10 giây (tăng từ 5 giây để giảm tải server)
+    // ⚠️ CHỈ tạo interval nếu chưa dừng
+    if (!shouldStopPolling) {
+      pollingIntervalRef.current = setInterval(() => {
+        if (!shouldStopPolling) {
+          checkPaymentStatus();
+        } else {
+          // Dừng interval nếu flag đã được set
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+        }
+      }, 10000);
+    }
+
+    // Cleanup khi component unmount hoặc dependencies thay đổi
+    return () => {
+      shouldStopPolling = true; // Set flag để dừng polling
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+    // ⚠️ QUAN TRỌNG: Loại bỏ isChecking khỏi dependencies để tránh re-run useEffect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderData.id, paymentStatus, token, onPaymentConfirmed]);
+
+  // ✅ Xác nhận thanh toán thủ công
+  const handleConfirmPayment = async () => {
+    // ✅ QUAN TRỌNG: Nếu không có id nhưng có orderCode, fetch id từ database
+    let orderId = orderData.id;
+    if (!orderId && orderData.orderCode) {
+      try {
+        const response = await fetch(`${API_URL}/api/orders/me`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const order = data.orders?.find((o: any) => o.orderCode === orderData.orderCode);
+          if (order) {
+            orderId = order.id;
+            // Cập nhật orderData với id
+            orderData = { ...orderData, id: orderId };
+            console.log('✅ Fetched order id from database:', orderId);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error fetching order id:', error);
+      }
+    }
+    
+    if (!orderId) {
+      message.error('Không tìm thấy mã đơn hàng. Vui lòng thử lại sau.');
+      return;
+    }
+
+    try {
+      setIsConfirming(true);
+      const response = await fetch(`${API_URL}/api/payments/confirm/${orderId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setPaymentStatus('PAID');
+          // Dừng polling
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          // Cập nhật orderData và gọi callback
+          const updatedOrderData = { ...orderData, paymentStatus: 'PAID' };
+          onPaymentConfirmed(updatedOrderData);
+          message.success('Đã xác nhận thanh toán thành công!');
+        } else {
+          message.error(data.message || 'Không thể xác nhận thanh toán');
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        message.error(errorData.message || 'Có lỗi xảy ra khi xác nhận thanh toán');
+      }
+    } catch (error) {
+      console.error('Error confirming payment:', error);
+      message.error('Có lỗi xảy ra khi xác nhận thanh toán');
+    } finally {
+      setIsConfirming(false);
+    }
+  };
+
+  const isPaid = paymentStatus === 'PAID';
+
+  return (
+    <div className="order-qr-code" style={{
+      marginTop: '16px',
+      padding: '16px',
+      border: isPaid ? '2px solid #4caf50' : '2px solid #e0e0e0',
+      borderRadius: '8px',
+      backgroundColor: isPaid ? '#f1f8f4' : '#f9f9f9',
+      textAlign: 'center'
+    }}>
+      {isPaid ? (
+        <>
+          <div style={{ fontSize: '18px', color: '#4caf50', marginBottom: '12px', fontWeight: 'bold' }}>
+            ✅ Đã thanh toán thành công
+          </div>
+          <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+            <strong>Mã đơn hàng:</strong> {orderData.orderCode}
+          </div>
+          <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+            <strong>Số tiền:</strong> {orderData.total?.toLocaleString('vi-VN')}₫
+          </div>
+        </>
+      ) : (
+        <>
+          <h4 style={{ marginBottom: '12px', color: '#333' }}>
+            Quét mã QR để thanh toán
+          </h4>
+          <div style={{ marginBottom: '12px' }}>
+            <img 
+              src={orderData.qrCode?.qrCodeUrl} 
+              alt="QR Code thanh toán" 
+              style={{
+                maxWidth: '250px',
+                width: '100%',
+                height: 'auto',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                padding: '8px',
+                backgroundColor: '#fff'
+              }}
+            />
+          </div>
+          <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+            <strong>Mã đơn hàng:</strong> {orderData.orderCode}
+          </div>
+          <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+            <strong>Số tiền:</strong> {orderData.total?.toLocaleString('vi-VN')}₫
+          </div>
+          <div style={{ fontSize: '12px', color: '#999', marginBottom: '16px' }}>
+            Vui lòng quét mã QR bằng ứng dụng ngân hàng để thanh toán
+          </div>
+          <div style={{ 
+            fontSize: '12px', 
+            color: '#666', 
+            marginBottom: '12px',
+            fontStyle: 'italic'
+          }}>
+            {isChecking ? 'Đang kiểm tra trạng thái thanh toán...' : 'Đang tự động kiểm tra trạng thái thanh toán...'}
+          </div>
+          <button
+            onClick={handleConfirmPayment}
+            disabled={isConfirming || isPaid}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: isPaid ? '#ccc' : '#4caf50',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: isPaid || isConfirming ? 'not-allowed' : 'pointer',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              width: '100%',
+              maxWidth: '250px',
+              opacity: isPaid || isConfirming ? 0.6 : 1,
+              transition: 'all 0.3s ease'
+            }}
+          >
+            {isConfirming ? 'Đang xác nhận...' : isPaid ? 'Đã thanh toán' : 'Tôi đã thanh toán'}
+          </button>
+        </>
+      )}
+    </div>
+  );
+};
+
 const ChatBox: React.FC = () => {
   const initialUserId = getUserId();
   const [isOpen, setIsOpen] = useState(false);
@@ -166,6 +725,11 @@ const ChatBox: React.FC = () => {
   const [showFAQ, setShowFAQ] = useState(true); // Hiển thị FAQ khi mở chatbox
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  
+  // ✅ Protection: Prevent duplicate requests
+  const isSendingRef = useRef(false);
+  const lastSentMessageRef = useRef<string>('');
+  const lastSentTimeRef = useRef<number>(0);
   
   // ✅ Cache products data để tạo product cards
   const [productsCache, setProductsCache] = useState<Map<string, { 
@@ -474,37 +1038,184 @@ const ChatBox: React.FC = () => {
 
   // ✅ Helper: Extract product name và price từ text
   // Ví dụ: "Canh Cua Cà Pháo - 110.000đ" → { name: "Canh Cua Cà Pháo", price: "110.000đ" }
-  const extractProductInfo = (text: string): { name: string; price?: string } | null => {
+  // ⚠️ QUAN TRỌNG: ReactMarkdown đã loại bỏ dấu `-` ở đầu list item, nên text sẽ là "Tên - giá" (không có dấu `-` ở đầu)
+  // ✅ Cache kết quả extractProductInfo để tránh tính toán lại
+  const extractProductInfoCache = useRef<Map<string, { name: string; price?: string } | null>>(new Map());
+
+  const extractProductInfo = useCallback((text: string): { name: string; price?: string } | null => {
     if (!text || typeof text !== 'string') return null;
+    
+    // ✅ Check cache trước
+    const cacheKey = text.trim();
+    if (extractProductInfoCache.current.has(cacheKey)) {
+      return extractProductInfoCache.current.get(cacheKey) || null;
+    }
     
     // Remove markdown formatting và clean
     const cleanText = text.replace(/\*\*/g, '').replace(/`/g, '').trim();
     
-    // Pattern 1: "Tên món - giá" với ₫ hoặc đ ở cuối
-    // Ví dụ: "Canh Cua Cà Pháo - 110.000₫" hoặc "Canh Cua Cà Pháo - 110.000đ"
-    const match1 = cleanText.match(/^(.+?)\s*-\s*([\d.,\s]+[₫đ])$/i);
-    if (match1) {
-      const name = match1[1].trim();
-      const price = match1[2].trim();
-      // Kiểm tra xem có phải số hợp lệ không
-      if (name.length > 2 && /[\d.,\s]+/.test(price)) {
-        return { name, price };
+    // ✅ Pattern 0: Bắt đầu bằng dấu `-` (list item format với dấu `-` còn lại) - ƯU TIÊN CAO NHẤT
+    // Ví dụ: "- Canh Cua Cà Pháo - 110.000₫" (trường hợp hiếm, ReactMarkdown thường loại bỏ dấu `-` ở đầu)
+    const match0 = cleanText.match(/^-\s*(.+?)\s*-\s*([\d.,\s]+[₫đ]?)$/i);
+    if (match0) {
+      const name = match0[1].trim();
+      const priceStr = match0[2].trim();
+      const priceNum = priceStr.replace(/[^\d]/g, '');
+      if (name.length >= 3 && priceNum.length >= 3) {
+        const result = {
+          name,
+          price: priceStr.includes('₫') || priceStr.includes('đ') ? priceStr : `${priceStr}₫`
+        };
+        extractProductInfoCache.current.set(cacheKey, result);
+        return result;
+      }
+    }
+    
+    // ✅ Pattern 0.5: "Tên món với giá X₫" hoặc "món Tên món với giá X₫" (AI trả lời trong paragraph)
+    // Ví dụ: "Lẩu Gà Tre Lá Giang với giá 250.000₫" hoặc "món Lẩu Gà Tre Lá Giang với giá 250.000₫"
+    // ⚠️ QUAN TRỌNG: Pattern phải match được cả khi có text trước (ví dụ: "Vậy bạn có thể thử món Lẩu Gà Tre Lá Giang với giá 250.000₫")
+    // Tìm pattern "với giá [số]₫" và lấy text trước đó làm tên món
+    const withPriceIndex = cleanText.toLowerCase().indexOf('với giá');
+    if (withPriceIndex > 0) {
+      const beforeWithPrice = cleanText.substring(0, withPriceIndex).trim();
+      const afterWithPrice = cleanText.substring(withPriceIndex + 8).trim(); // "với giá" = 8 ký tự
+      const priceMatch = afterWithPrice.match(/^([\d.,\s]+[₫đ])/i);
+      
+      if (priceMatch) {
+        const priceStr = priceMatch[1].trim();
+        const priceNum = priceStr.replace(/[^\d]/g, '');
+        
+        // Lấy tên món từ phần trước "với giá"
+        // Loại bỏ các từ khóa thường gặp ở đầu: "món", "sản phẩm", "item"
+        let name = beforeWithPrice.replace(/^(món|sản\s*phẩm|item|thử\s+món|bạn\s+có\s+thể\s+thử\s+món):?\s*/i, '').trim();
+        
+        // Nếu name vẫn còn dài, có thể có text trước tên món, tìm tên món (thường bắt đầu bằng chữ hoa hoặc là từ dài)
+        // Ví dụ: "Vậy bạn có thể thử món Lẩu Gà Tre Lá Giang" → name = "Lẩu Gà Tre Lá Giang"
+        const words = name.split(/\s+/);
+        const productNameWords: string[] = [];
+        let foundProductStart = false;
+        
+        for (const word of words) {
+          // Tên món thường bắt đầu bằng chữ hoa hoặc là từ dài (>= 3 ký tự)
+          if (!foundProductStart && (word[0] === word[0].toUpperCase() || word.length >= 3)) {
+            foundProductStart = true;
+          }
+          if (foundProductStart) {
+            productNameWords.push(word);
+          }
+        }
+        
+        if (productNameWords.length > 0) {
+          name = productNameWords.join(' ');
+        }
+        
+        if (name.length >= 3 && priceNum.length >= 3) {
+          const result = {
+            name: name.trim(),
+            price: priceStr.includes('₫') || priceStr.includes('đ') ? priceStr : `${priceStr}₫`
+          };
+          extractProductInfoCache.current.set(cacheKey, result);
+          return result;
+        }
+      }
+    }
+    
+    // ✅ Pattern 0.6: "Tên món giá X₫" hoặc "món Tên món giá X₫" (không có "với")
+    // Ví dụ: "Lẩu Gà Tre Lá Giang giá 250.000₫"
+    const priceIndex = cleanText.toLowerCase().indexOf(' giá ');
+    if (priceIndex > 0) {
+      const beforePrice = cleanText.substring(0, priceIndex).trim();
+      const afterPrice = cleanText.substring(priceIndex + 5).trim(); // " giá " = 5 ký tự
+      const priceMatch = afterPrice.match(/^([\d.,\s]+[₫đ])/i);
+      
+      if (priceMatch) {
+        const priceStr = priceMatch[1].trim();
+        const priceNum = priceStr.replace(/[^\d]/g, '');
+        
+        // Lấy tên món từ phần trước "giá"
+        let name = beforePrice.replace(/^(món|sản\s*phẩm|item|thử\s+món|bạn\s+có\s+thể\s+thử\s+món):?\s*/i, '').trim();
+        
+        // Tương tự như pattern 0.5, tìm tên món thực sự
+        const words = name.split(/\s+/);
+        const productNameWords: string[] = [];
+        let foundProductStart = false;
+        
+        for (const word of words) {
+          if (!foundProductStart && (word[0] === word[0].toUpperCase() || word.length >= 3)) {
+            foundProductStart = true;
+          }
+          if (foundProductStart) {
+            productNameWords.push(word);
+          }
+        }
+        
+        if (productNameWords.length > 0) {
+          name = productNameWords.join(' ');
+        }
+        
+        if (name.length >= 3 && priceNum.length >= 3) {
+          const result = {
+            name: name.trim(),
+            price: priceStr.includes('₫') || priceStr.includes('đ') ? priceStr : `${priceStr}₫`
+          };
+          extractProductInfoCache.current.set(cacheKey, result);
+          return result;
+        }
+      }
+    }
+    
+    // ✅ Pattern 1: "Tên món - giá" với ₫ hoặc đ ở cuối - ƯU TIÊN CAO (phổ biến nhất)
+    // Ví dụ: "Salad Cải Mầm Trứng - 89.000₫" hoặc "Cá Kho Làng Vũ Đại - 500g - 250.000₫"
+    // ⚠️ QUAN TRỌNG: Phải tìm từ cuối lên để xử lý trường hợp có nhiều dấu `-` trong tên món
+    // Tìm dấu `-` cuối cùng trước giá (có ₫ hoặc đ)
+    const lastDashIndex = cleanText.lastIndexOf(' - ');
+    if (lastDashIndex > 0) {
+      const afterLastDash = cleanText.substring(lastDashIndex + 3).trim();
+      const priceMatch = afterLastDash.match(/^([\d.,\s]+[₫đ])$/i);
+      
+      if (priceMatch) {
+        const price = priceMatch[1].trim();
+        const priceNum = price.replace(/[^\d]/g, '');
+        
+        // Lấy phần trước dấu `-` cuối cùng làm tên món
+        const namePart = cleanText.substring(0, lastDashIndex).trim();
+        
+        // Loại bỏ các từ khóa thường gặp ở đầu
+        const cleanedName = namePart.replace(/^(giỏ\s*hàng|món|đơn\s*hàng|sản\s*phẩm|item):?\s*/i, '').trim();
+        
+        // Kiểm tra: tên phải có ít nhất 3 ký tự và giá phải có ít nhất 3 chữ số
+        if (cleanedName.length >= 3 && priceNum.length >= 3) {
+          const result = { name: cleanedName, price };
+          extractProductInfoCache.current.set(cacheKey, result);
+          return result;
+        }
       }
     }
     
     // Pattern 2: "Tên món - số" (không có ₫, thêm ₫ vào)
     // Ví dụ: "Canh Cua Cà Pháo - 110.000" hoặc "Salad Cải Mầm Trứng - 89.000"
-    const match2 = cleanText.match(/^(.+?)\s*-\s*([\d.,\s]+)$/);
-    if (match2) {
-      const name = match2[1].trim();
-      const priceStr = match2[2].trim();
-      // Kiểm tra xem có phải số không (ít nhất 3 chữ số)
+    // ⚠️ QUAN TRỌNG: Phải tìm từ cuối lên để xử lý trường hợp có nhiều dấu `-` trong tên món
+    const lastDashIndex2 = cleanText.lastIndexOf(' - ');
+    if (lastDashIndex2 > 0) {
+      const afterLastDash2 = cleanText.substring(lastDashIndex2 + 3).trim();
+      const priceMatch2 = afterLastDash2.match(/^([\d.,\s]+)$/);
+      
+      if (priceMatch2) {
+        const priceStr = priceMatch2[1].trim();
       const priceNum = priceStr.replace(/[^\d]/g, '');
-      if (name.length > 2 && priceNum.length >= 3) {
-        return {
-          name,
+        
+        // Lấy phần trước dấu `-` cuối cùng làm tên món
+        const namePart = cleanText.substring(0, lastDashIndex2).trim();
+        const cleanedName = namePart.replace(/^(giỏ\s*hàng|món|đơn\s*hàng|sản\s*phẩm|item):?\s*/i, '').trim();
+        
+        if (cleanedName.length >= 3 && priceNum.length >= 3) {
+          const result = {
+            name: cleanedName,
           price: `${priceStr}₫`
         };
+          extractProductInfoCache.current.set(cacheKey, result);
+          return result;
+        }
       }
     }
     
@@ -514,14 +1225,108 @@ const ChatBox: React.FC = () => {
       const name = match3[1].trim();
       const priceStr = match3[2].trim();
       if (name.length > 2) {
-        return {
+        const result = {
           name,
           price: priceStr.includes('₫') || priceStr.includes('đ') ? priceStr : `${priceStr}₫`
         };
+        extractProductInfoCache.current.set(cacheKey, result);
+        return result;
       }
     }
     
+    // ✅ Pattern 4: Tìm pattern "Tên - giá" ở bất kỳ đâu trong text (không chỉ ở đầu)
+    // Ví dụ: "Giỏ hàng: Canh Cua Cà Pháo - 110.000₫" hoặc "Món: Lẩu Gà Tre Lá Giang - 250.000₫"
+    // ⚠️ QUAN TRỌNG: Phải tìm từ cuối lên để xử lý trường hợp có nhiều dấu `-` trong tên món
+    const lastDashIndex4 = cleanText.lastIndexOf(' - ');
+    if (lastDashIndex4 > 0) {
+      const afterLastDash4 = cleanText.substring(lastDashIndex4 + 3).trim();
+      const priceMatch4 = afterLastDash4.match(/^([\d.,\s]+[₫đ])/i);
+      
+      if (priceMatch4) {
+        const price = priceMatch4[1].trim();
+        const priceNum = price.replace(/[^\d]/g, '');
+        
+        // Lấy phần trước dấu `-` cuối cùng làm tên món
+        const namePart = cleanText.substring(0, lastDashIndex4).trim();
+        const cleanedName = namePart.replace(/^(giỏ\s*hàng|món|đơn\s*hàng|sản\s*phẩm|item):?\s*/i, '').trim();
+        
+        if (cleanedName.length >= 3 && priceNum.length >= 3) {
+          const result = { name: cleanedName, price };
+          extractProductInfoCache.current.set(cacheKey, result);
+          return result;
+        }
+      }
+    }
+    
+    // ✅ Pattern 5: Tìm pattern "Tên - số" ở bất kỳ đâu trong text (không có ₫)
+    // ⚠️ QUAN TRỌNG: Phải tìm từ cuối lên để xử lý trường hợp có nhiều dấu `-` trong tên món
+    const lastDashIndex5 = cleanText.lastIndexOf(' - ');
+    if (lastDashIndex5 > 0) {
+      const afterLastDash5 = cleanText.substring(lastDashIndex5 + 3).trim();
+      const priceMatch5 = afterLastDash5.match(/^([\d.,\s]+)$/);
+      
+      if (priceMatch5) {
+        const priceStr = priceMatch5[1].trim();
+        const priceNum = priceStr.replace(/[^\d]/g, '');
+        
+        // Lấy phần trước dấu `-` cuối cùng làm tên món
+        const namePart = cleanText.substring(0, lastDashIndex5).trim();
+        const cleanedName = namePart.replace(/^(giỏ\s*hàng|món|đơn\s*hàng|sản\s*phẩm|item):?\s*/i, '').trim();
+        
+        if (cleanedName.length >= 3 && priceNum.length >= 3) {
+          const result = {
+            name: cleanedName,
+            price: `${priceStr}₫`
+          };
+          // ✅ Cache kết quả
+          extractProductInfoCache.current.set(cacheKey, result);
+          return result;
+        }
+      }
+    }
+    
+    // ✅ Cache null result để tránh tính toán lại
+    extractProductInfoCache.current.set(cacheKey, null);
     return null;
+  }, []);
+
+  // ✅ Helper: Loại bỏ các dòng sản phẩm bị lặp lại (ví dụ: cùng món xuất hiện cả dạng bullet và dạng text)
+  const removeDuplicateProductLines = (text: string): string => {
+    if (!text) return text;
+    
+    const lines = text.split('\n');
+    const processedLines: string[] = [];
+    const bulletProductKeys = new Set<string>(); // Các sản phẩm đã xuất hiện trong bullet list
+    
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      
+      if (!trimmedLine) {
+        processedLines.push(line);
+        continue;
+      }
+      
+      const isBulletLine = /^(\s*[-•*]\s+|\s*\d+\.\s+)/.test(trimmedLine);
+      const lineWithoutBullet = trimmedLine.replace(/^(\s*[-•*]\s+|\s*\d+\.\s+)/, '').trim();
+      const productInfo = extractProductInfo(lineWithoutBullet);
+      
+      if (productInfo) {
+        const productKey = `${normalizeText(productInfo.name)}|${productInfo.price || ''}`;
+        
+        if (!isBulletLine && bulletProductKeys.has(productKey)) {
+          // ⚠️ Đây là dòng text trùng với sản phẩm đã hiển thị trong bullet → bỏ qua để tránh hiển thị 2 lần
+          continue;
+        }
+        
+        if (isBulletLine) {
+          bulletProductKeys.add(productKey);
+        }
+      }
+      
+      processedLines.push(line);
+    }
+    
+    return processedLines.join('\n').replace(/\n{3,}/g, '\n\n');
   };
 
   // ✅ Helper: Extract combo info từ text dài (ví dụ: "Nhà hàng có Combo cặp đôi với mô tả..., giá 650.000₫")
@@ -723,14 +1528,27 @@ const ChatBox: React.FC = () => {
   };
 
   // ✅ Helper: Extract text từ React children
+  // ⚠️ QUAN TRỌNG: ReactMarkdown có thể parse list items thành array phức tạp
+  // Cần extract đúng text từ tất cả các children
+  // ⚠️ QUAN TRỌNG: Phải extract đúng text cho TẤT CẢ các list items, kể cả món cuối cùng
   const extractTextFromChildren = (children: any): string => {
     if (typeof children === 'string') return children;
     if (typeof children === 'number') return String(children);
     if (Array.isArray(children)) {
-      return children.map(child => extractTextFromChildren(child)).join('');
+      // ✅ Join với khoảng trắng để đảm bảo text không bị dính liền
+      // ⚠️ QUAN TRỌNG: Phải join TẤT CẢ các children, không bỏ sót phần tử nào
+      const extracted = children.map(child => extractTextFromChildren(child)).filter(Boolean);
+      return extracted.join(' ');
     }
-    if (children && typeof children === 'object' && 'props' in children) {
-      return extractTextFromChildren(children.props?.children);
+    if (children && typeof children === 'object') {
+      // ✅ Xử lý React elements
+      if ('props' in children && children.props) {
+        return extractTextFromChildren(children.props.children);
+      }
+      // ✅ Xử lý các object khác có thể chứa text
+      if ('children' in children) {
+        return extractTextFromChildren(children.children);
+      }
     }
     return '';
   };
@@ -869,12 +1687,18 @@ const ChatBox: React.FC = () => {
       const beforeText = cleanText.substring(0, matchStart).trim();
       let afterText = cleanText.substring(priceEnd).trim();
       
-      // ✅ Loại bỏ phần câu hỏi về combo trong afterText (như "Bạn có muốn thêm nào vào giỏ hàng không?")
+      // ⚠️ QUAN TRỌNG: CHỈ loại bỏ phần câu hỏi về combo CỤ THỂ (có từ "combo")
+      // KHÔNG loại bỏ câu hỏi chung về "thêm món" (không có từ "combo")
+      // Ví dụ: "Bạn muốn mình thêm món nào vào giỏ hàng không ạ?" → KHÔNG loại bỏ
+      // Ví dụ: "Bạn có muốn thêm combo nào vào giỏ hàng không?" → Loại bỏ
       const lowerAfterText = afterText.toLowerCase();
-      if (lowerAfterText.includes('bạn có muốn') || 
-          lowerAfterText.includes('bạn muốn') ||
-          (lowerAfterText.includes('thêm') && lowerAfterText.includes('giỏ hàng'))) {
-        // Bỏ toàn bộ phần câu hỏi
+      const isComboSpecificQuestion = (
+        (lowerAfterText.includes('bạn có muốn') || lowerAfterText.includes('bạn muốn')) && 
+        lowerAfterText.includes('combo') && // ⚠️ PHẢI có từ "combo"
+        (lowerAfterText.includes('thêm') || lowerAfterText.includes('giỏ hàng'))
+      );
+      if (isComboSpecificQuestion) {
+        // Chỉ bỏ phần câu hỏi về combo cụ thể
         afterText = '';
       }
       
@@ -890,26 +1714,20 @@ const ChatBox: React.FC = () => {
     return null;
   };
 
-  // ✅ Helper: Render combo card từ combo info
-  const renderComboCardFromInfo = (comboInfo: { name: string; price?: string }): React.ReactNode | null => {
+  // ✅ Helper: Render combo card từ combo info (MEMOIZED để tránh re-render)
+  const renderComboCardFromInfo = useCallback((comboInfo: { name: string; price?: string }): React.ReactNode | null => {
     let comboName = comboInfo.name;
     let comboDisplayPrice = comboInfo.price || '';
     let combo: { id: string; name: string; image?: string; price?: number; slug?: string } | null = null;
     
-    console.log('🎨 Rendering combo card from info:', {
-      comboName,
-      comboDisplayPrice,
-      combosCacheSize: combosCache.size
-    });
+    // ⚠️ Đã bỏ console.log để tránh log nhiều lần khi re-render
     
     // Tìm combo trong cache
     if (comboName) {
       combo = findComboInCache(comboName);
-      console.log('🔍 First search result:', combo ? { id: combo.id, name: combo.name, hasImage: !!combo.image } : 'Not found');
       
       if (!combo && !comboName.toLowerCase().startsWith('combo')) {
         combo = findComboInCache(`combo ${comboName}`);
-        console.log('🔍 Second search result (with "combo" prefix):', combo ? { id: combo.id, name: combo.name, hasImage: !!combo.image } : 'Not found');
       }
       
       // Nếu vẫn không tìm thấy, thử tìm với các biến thể khác
@@ -917,7 +1735,6 @@ const ChatBox: React.FC = () => {
         // Thử tìm với tên không có dấu
         const nameWithoutTones = removeVietnameseTones(comboName).toLowerCase();
         combo = findComboInCache(nameWithoutTones);
-        console.log('🔍 Third search result (without tones):', combo ? { id: combo.id, name: combo.name, hasImage: !!combo.image } : 'Not found');
       }
       
       // Nếu vẫn không tìm thấy, thử fuzzy match trong cache
@@ -926,14 +1743,11 @@ const ChatBox: React.FC = () => {
         for (const [key, cachedCombo] of combosCache.entries()) {
           if (key.includes(normalizedSearch) || normalizedSearch.includes(key)) {
             combo = cachedCombo;
-            console.log('🔍 Fuzzy match found:', { key, combo: { id: combo.id, name: combo.name, hasImage: !!combo.image } });
             break;
           }
         }
       }
     }
-    
-    console.log('🔍 Final combo found:', combo ? { id: combo.id, name: combo.name, hasImage: !!combo.image, image: combo.image } : 'Not found');
     
     if (!combo && (!comboName || comboName.length < 2)) {
       console.warn('⚠️ Cannot render combo card:', {
@@ -1036,7 +1850,7 @@ const ChatBox: React.FC = () => {
     }
     
     return comboCardContent;
-  };
+  }, [combosCache, findComboInCache, removeVietnameseTones, normalizeText, getImageUrl]);
 
   // ✅ Custom markdown components để render product cards và action cards
   const markdownComponents: Components = {
@@ -1044,30 +1858,79 @@ const ChatBox: React.FC = () => {
       // Extract text từ children
       const childText = extractTextFromChildren(children);
       
-      // ✅ Ẩn các paragraph chỉ chứa câu hỏi về combo (như "Bạn có muốn thêm nào vào giỏ hàng không?")
+      // ⚠️ QUAN TRỌNG: KHÔNG ẩn câu hỏi chung về thêm món vào giỏ hàng (như "Bạn muốn mình thêm món nào vào giỏ hàng không ạ?")
+      // CHỈ ẩn câu hỏi cụ thể về combo (như "Bạn có muốn thêm combo nào vào giỏ hàng không?")
       const cleanChildText = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
       const lowerChildText = cleanChildText.toLowerCase();
-      // Detect cả trường hợp text bị tách (như "nào vào giỏ hàng không?" hoặc "Bạn có muốn thêm")
-      const isComboQuestionOnly = (
+      
+      // ⚠️ CHỈ ẩn nếu câu hỏi có từ "combo" rõ ràng (câu hỏi về combo cụ thể)
+      // KHÔNG ẩn câu hỏi chung về "thêm món" (không có từ "combo")
+      const isComboSpecificQuestion = (
         (lowerChildText.includes('bạn có muốn') || lowerChildText.includes('bạn muốn')) && 
-        (lowerChildText.includes('thêm') || lowerChildText.includes('combo') || lowerChildText.includes('vào giỏ') || lowerChildText.includes('giỏ hàng'))
-      ) || (
-        (lowerChildText.includes('nào vào giỏ hàng') || lowerChildText.includes('vào giỏ hàng không')) &&
-        !lowerChildText.match(/combo\s+\w+/) // Không ẩn nếu có tên combo cụ thể
+        lowerChildText.includes('combo') && // ⚠️ PHẢI có từ "combo"
+        (lowerChildText.includes('thêm') || lowerChildText.includes('vào giỏ') || lowerChildText.includes('giỏ hàng'))
       );
-      if (isComboQuestionOnly) {
-        return null; // Không render paragraph này
+      
+      // ⚠️ KHÔNG ẩn câu hỏi chung về "thêm món" (không có từ "combo")
+      // Ví dụ: "Bạn muốn mình thêm món nào vào giỏ hàng không ạ?" → KHÔNG ẩn
+      if (isComboSpecificQuestion) {
+        return null; // Chỉ ẩn câu hỏi về combo cụ thể
       }
       
       // ✅ Loại bỏ "Tổng cộng" khỏi combo card detection
+      // ⚠️ QUAN TRỌNG: "Tổng cộng" thường được parse thành `p` tag (không có dấu `-` ở đầu)
       const cleanChildTextForTotal = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
       const lowerChildTextForTotal = cleanChildTextForTotal.toLowerCase();
+      
+      // ⚠️ QUAN TRỌNG: Pattern phải match được "Tổng cộng: 260.000₫" hoặc "Tổng cộng: 260.000₫ [text khác]"
+      // ⚠️ QUAN TRỌNG: "Tổng cộng" có thể xuất hiện ở bất kỳ đâu trong text (không nhất thiết phải ở đầu)
       const isTotalLine = lowerChildTextForTotal.includes('tổng cộng') || 
                          lowerChildTextForTotal.includes('tổng:') ||
-                         (lowerChildTextForTotal.startsWith('tổng') && lowerChildTextForTotal.includes('₫'));
+                         (lowerChildTextForTotal.includes('tổng') && lowerChildTextForTotal.includes('₫'));
+      
+      // ✅ Debug: Log để kiểm tra "Tổng cộng" có được detect không
       if (isTotalLine) {
-        // Render như text thông thường, không phải combo card
-        return <p {...props}>{children}</p>;
+        console.log('🔍 [p] Detected total line:', cleanChildTextForTotal, 'lowerText:', lowerChildTextForTotal);
+      }
+      
+      if (isTotalLine) {
+        // ⚠️ QUAN TRỌNG: Nếu text có cả "Tổng cộng" và "Để hoàn tất..." → Tách riêng ra
+        // Chỉ tô đỏ phần "Tổng cộng: [số]₫", không tô đỏ phần "Để hoàn tất..."
+        // Pattern: "Tổng cộng: [số]₫" hoặc "Tổng cộng: [số]₫ [text khác]"
+        // ⚠️ QUAN TRỌNG: Pattern phải match được cả khi "Tổng cộng" không ở đầu text
+        const totalMatch = cleanChildTextForTotal.match(/(Tổng cộng:\s*[\d.,\s]+[₫đ])/i);
+        const hasCompleteOrderText = lowerChildTextForTotal.includes('để hoàn tất') || 
+                                     lowerChildTextForTotal.includes('cần một số thông tin');
+        
+        if (totalMatch && hasCompleteOrderText) {
+          // Tách riêng "Tổng cộng" và "Để hoàn tất..."
+          const totalText = totalMatch[1];
+          const beforeTotalText = cleanChildTextForTotal.substring(0, totalMatch.index || 0).trim();
+          const afterTotalText = cleanChildTextForTotal.substring((totalMatch.index || 0) + totalMatch[0].length).trim();
+          
+          return (
+            <p {...props} style={{ marginTop: '8px', marginBottom: '8px' }}>
+              {beforeTotalText && <span style={{ color: 'inherit' }}>{beforeTotalText} </span>}
+              <span style={{ fontWeight: 'bold', color: '#dc3545' }}>{totalText}</span>
+              {afterTotalText && (
+                <>
+                  <br />
+                  <span style={{ color: 'inherit' }}>{afterTotalText}</span>
+                </>
+              )}
+            </p>
+          );
+        }
+        
+        // Nếu chỉ có "Tổng cộng" → Tô đỏ cả dòng
+        // ⚠️ QUAN TRỌNG: Đảm bảo "Tổng cộng" được render và hiển thị
+        // ⚠️ QUAN TRỌNG: Nếu text có "Tổng cộng" nhưng không match pattern trên → Vẫn render với style đỏ
+        console.log('✅ [p] Rendering total line with red style:', cleanChildTextForTotal);
+        return (
+          <p {...props} style={{ fontWeight: 'bold', color: '#dc3545', marginTop: '8px', marginBottom: '8px' }}>
+            {children}
+          </p>
+        );
       }
       
       // ✅ Kiểm tra xem có combo không trong paragraph
@@ -1075,14 +1938,98 @@ const ChatBox: React.FC = () => {
       if (comboExtract && comboExtract.comboInfo) {
         const comboCard = renderComboCardFromInfo(comboExtract.comboInfo);
         if (comboCard) {
-          // ✅ Chỉ hiển thị beforeText và comboCard, bỏ phần afterText (đã được loại bỏ câu hỏi)
+          // ✅ Hiển thị beforeText, comboCard, và afterText (nếu có)
           return (
             <p {...props} style={{ margin: '8px 0' }}>
               {comboExtract.beforeText && <span>{comboExtract.beforeText} </span>}
               {comboCard}
+              {comboExtract.afterText && <span> {comboExtract.afterText}</span>}
             </p>
           );
         }
+      }
+      
+      // ✅ Kiểm tra xem có product không trong paragraph (QUAN TRỌNG - AI có thể trả lời trong paragraph)
+      // Pattern: "Lẩu Gà Tre Lá Giang với giá 250.000₫" hoặc "món Lẩu Gà Tre Lá Giang với giá 250.000₫"
+      const productInfo = extractProductInfo(childText);
+      if (productInfo) {
+        const productName = productInfo.name;
+        const displayPrice = productInfo.price || '';
+        
+        // Tìm product trong cache
+        const product = findProductInCache(productName);
+        const finalProductName = product?.name || productName;
+        const productSlug = product?.slug || `${removeVietnameseTones(productName)}-${product?.id || 'unknown'}`;
+        
+        // Lấy image URL
+        let imageUrl: string | null = null;
+        if (product?.image) {
+          imageUrl = getImageUrl(product.image);
+        }
+        
+        // Render product card
+        const cardContent = (
+          <div className="product-card-inline">
+            <div className="product-card-image-wrapper">
+              {imageUrl ? (
+                <img 
+                  src={imageUrl} 
+                  alt={finalProductName}
+                  className="product-card-image"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                  loading="lazy"
+                />
+              ) : (
+                <div className="product-card-placeholder">
+                  <span style={{ fontSize: '32px', opacity: 0.3 }}>🍽️</span>
+                </div>
+              )}
+            </div>
+            <div className="product-card-content">
+              <span className="product-card-name">
+                {finalProductName}
+              </span>
+              {displayPrice && (
+                <span className="product-card-price">{displayPrice}</span>
+              )}
+            </div>
+          </div>
+        );
+        
+        // Extract beforeText và afterText từ paragraph
+        // Ví dụ: "Chắc chắn rồi. Vậy bạn có thể thử món Lẩu Gà Tre Lá Giang với giá 250.000₫ nhé."
+        // → beforeText: "Chắc chắn rồi. Vậy bạn có thể thử món"
+        // → afterText: "nhé."
+        const productNameIndex = childText.indexOf(productName);
+        const priceIndex = childText.indexOf(displayPrice);
+        const beforeText = productNameIndex > 0 ? childText.substring(0, productNameIndex).trim() : '';
+        const afterText = priceIndex > 0 ? childText.substring(priceIndex + displayPrice.length).trim() : '';
+        
+        if (product) {
+          return (
+            <p {...props} style={{ margin: '8px 0' }}>
+              {beforeText && <span>{beforeText} </span>}
+              <Link 
+                to={`/menu/${productSlug}`}
+                className="product-card-link-wrapper"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {cardContent}
+              </Link>
+              {afterText && <span> {afterText}</span>}
+            </p>
+          );
+        }
+        
+        return (
+          <p {...props} style={{ margin: '8px 0' }}>
+            {beforeText && <span>{beforeText} </span>}
+            {cardContent}
+            {afterText && <span> {afterText}</span>}
+          </p>
+        );
       }
       
       // Render bình thường
@@ -1090,7 +2037,13 @@ const ChatBox: React.FC = () => {
     },
     li: ({ children, ...props }) => {
       // Extract text từ children (có thể là React elements phức tạp)
+      // ⚠️ QUAN TRỌNG: Phải extract đúng text từ TẤT CẢ các children, kể cả món cuối cùng
       const childText = extractTextFromChildren(children);
+      
+      // ✅ Debug: Log để kiểm tra text extraction cho món cuối cùng
+      // if (childText && childText.includes(' - ') && childText.match(/[\d.,\s]+[₫đ]/)) {
+      //   console.log('🔍 [li] Extracted text:', childText, 'children type:', Array.isArray(children) ? 'array' : typeof children);
+      // }
       
       // ✅ Kiểm tra xem có phải order info card không (ưu tiên cao nhất)
       const orderInfoCardInfo = getOrderInfoCardInfo(childText);
@@ -1113,20 +2066,24 @@ const ChatBox: React.FC = () => {
         );
       }
       
-      // ✅ Ẩn các list item chỉ chứa câu hỏi về combo (như "Bạn có muốn thêm nào vào giỏ hàng không?")
+      // ⚠️ QUAN TRỌNG: KHÔNG ẩn câu hỏi chung về thêm món vào giỏ hàng (như "Bạn muốn mình thêm món nào vào giỏ hàng không ạ?")
+      // CHỈ ẩn câu hỏi cụ thể về combo (như "Bạn có muốn thêm combo nào vào giỏ hàng không?")
       // Phải kiểm tra TRƯỚC action card để tránh render nhầm
-      const cleanChildText = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
-      const lowerChildText = cleanChildText.toLowerCase();
-      // Detect cả trường hợp text bị tách (như "nào vào giỏ hàng không?" hoặc "Bạn có muốn thêm")
-      const isComboQuestionOnly = (
+      const cleanChildTextForCombo = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const lowerChildText = cleanChildTextForCombo.toLowerCase();
+      
+      // ⚠️ CHỈ ẩn nếu câu hỏi có từ "combo" rõ ràng (câu hỏi về combo cụ thể)
+      // KHÔNG ẩn câu hỏi chung về "thêm món" (không có từ "combo")
+      const isComboSpecificQuestion = (
         (lowerChildText.includes('bạn có muốn') || lowerChildText.includes('bạn muốn')) && 
-        (lowerChildText.includes('thêm') || lowerChildText.includes('combo') || lowerChildText.includes('vào giỏ') || lowerChildText.includes('giỏ hàng'))
-      ) || (
-        (lowerChildText.includes('nào vào giỏ hàng') || lowerChildText.includes('vào giỏ hàng không')) &&
-        !lowerChildText.match(/combo\s+\w+/) // Không ẩn nếu có tên combo cụ thể
+        lowerChildText.includes('combo') && // ⚠️ PHẢI có từ "combo"
+        (lowerChildText.includes('thêm') || lowerChildText.includes('vào giỏ') || lowerChildText.includes('giỏ hàng'))
       );
-      if (isComboQuestionOnly) {
-        return null; // Không render list item này
+      
+      // ⚠️ KHÔNG ẩn câu hỏi chung về "thêm món" (không có từ "combo")
+      // Ví dụ: "Bạn muốn mình thêm món nào vào giỏ hàng không ạ?" → KHÔNG ẩn
+      if (isComboSpecificQuestion) {
+        return null; // Chỉ ẩn câu hỏi về combo cụ thể
       }
       
       // ✅ Kiểm tra xem có phải action card không (ưu tiên cao hơn product)
@@ -1165,11 +2122,12 @@ const ChatBox: React.FC = () => {
               </li>
             );
           }
-          // Nếu có text trước, chỉ render text trước + comboCard, bỏ phần afterText (đã được loại bỏ câu hỏi)
+          // Nếu có text trước, render text trước + comboCard + afterText (nếu có)
           return (
             <li className="product-list-item" {...props}>
               {comboExtract.beforeText && <span>{comboExtract.beforeText} </span>}
               {comboCard}
+              {comboExtract.afterText && <span> {comboExtract.afterText}</span>}
             </li>
           );
         }
@@ -1219,71 +2177,349 @@ const ChatBox: React.FC = () => {
       }
       
       // ✅ Loại bỏ "Tổng cộng" khỏi product/combo card detection
+      // ⚠️ QUAN TRỌNG: Phải check TRƯỚC khi extract product info để tránh nhầm lẫn
+      // NHƯNG phải đảm bảo món cuối cùng (nếu có pattern "Tên - giá") vẫn được nhận diện
       const cleanChildTextForTotal = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
       const lowerChildTextForTotal = cleanChildTextForTotal.toLowerCase();
-      const isTotalLine = lowerChildTextForTotal.includes('tổng cộng') || 
-                         lowerChildTextForTotal.includes('tổng:') ||
-                         (lowerChildTextForTotal.startsWith('tổng') && lowerChildTextForTotal.includes('₫'));
-      if (isTotalLine) {
-        // Render như text thông thường, không phải product/combo card
-        return <li {...props}>{children}</li>;
+      
+      // ⚠️ QUAN TRỌNG: CHỈ block nếu text CHỈ là "Tổng cộng" hoặc bắt đầu bằng "Tổng cộng"
+      // KHÔNG block nếu text có pattern "Tên - giá" (có thể là món cuối cùng cùng dòng với "Tổng cộng")
+      const isOnlyTotalLine = (
+        lowerChildTextForTotal.startsWith('tổng cộng') || 
+        lowerChildTextForTotal.startsWith('tổng:') ||
+        (lowerChildTextForTotal.startsWith('tổng') && lowerChildTextForTotal.includes('₫') && !cleanChildTextForTotal.includes(' - '))
+      );
+      
+      // ⚠️ QUAN TRỌNG: Nếu text có pattern "Tên - giá" VÀ có "tổng cộng" → Có thể là món cuối cùng cùng dòng với "Tổng cộng"
+      // Cần tách riêng món cuối cùng ra trước khi check isTotalLine
+      const hasProductPatternInTotal = cleanChildTextForTotal.includes(' - ') && 
+                                       cleanChildTextForTotal.match(/[\d.,\s]+[₫đ]/) &&
+                                       lowerChildTextForTotal.includes('tổng');
+      
+      if (isOnlyTotalLine && !hasProductPatternInTotal) {
+        // ⚠️ QUAN TRỌNG: Nếu text có cả "Tổng cộng" và "Để hoàn tất..." → Tách riêng ra
+        // Chỉ tô đỏ phần "Tổng cộng: [số]₫", không tô đỏ phần "Để hoàn tất..."
+        const totalMatch = cleanChildTextForTotal.match(/^(Tổng cộng:\s*[\d.,\s]+[₫đ])/i);
+        const hasCompleteOrderText = lowerChildTextForTotal.includes('để hoàn tất') || 
+                                     lowerChildTextForTotal.includes('cần một số thông tin');
+        
+        if (totalMatch && hasCompleteOrderText) {
+          // Tách riêng "Tổng cộng" và "Để hoàn tất..."
+          const totalText = totalMatch[1];
+          const afterTotalText = cleanChildTextForTotal.substring(totalMatch[0].length).trim();
+          
+          return (
+            <li {...props} style={{ marginTop: '8px', marginBottom: '8px' }}>
+              <span style={{ fontWeight: 'bold', color: '#dc3545' }}>{totalText}</span>
+              {afterTotalText && (
+                <>
+                  <br />
+                  <span style={{ color: 'inherit' }}>{afterTotalText}</span>
+                </>
+              )}
+            </li>
+          );
+        }
+        
+        // Nếu chỉ có "Tổng cộng" → Tô đỏ cả dòng
+        return (
+          <li {...props} style={{ fontWeight: 'bold', color: '#dc3545', marginTop: '8px' }}>
+            {children}
+          </li>
+        );
       }
+      
       
       // ✅ KHÔNG ẩn các dòng text - hiển thị đầy đủ tất cả các món mà AI trả về
       // Mỗi dòng có thể là một item riêng biệt trong giỏ hàng (có thể có nhiều item cùng tên)
       // Logic render combo/product card sẽ tự động xử lý việc hiển thị
       
-      // ✅ Kiểm tra xem có phải product không (có pattern "Tên - giá" hoặc chỉ là tên món)
-      const productInfo = extractProductInfo(childText);
+      // ✅ QUAN TRỌNG: ReactMarkdown đã loại bỏ dấu `-` ở đầu list item
+      // Nên text sẽ là: "Salad Cải Mầm Trứng - 89.000₫" (không có dấu `-` ở đầu)
+      // Cần extract text và clean trước khi check
+      let cleanChildTextForProduct = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
       
-      // ✅ Nếu không match pattern "Tên - giá", thử kiểm tra xem có phải là tên món đơn thuần không
-      // (ví dụ: "Rau Tập Tàng Luộc Chấm Tương" không có giá)
+      // ⚠️ QUAN TRỌNG: Nếu text có cả món VÀ "Tổng cộng" → Tách riêng món cuối cùng ra
+      // Ví dụ: "Lẩu Gà Ác Tiềm Thuốc Bắc - 250.000₫ Tổng cộng: 449.000₫"
+      // → Cần extract "Lẩu Gà Ác Tiềm Thuốc Bắc - 250.000₫" làm product
+      // ⚠️ QUAN TRỌNG: Đây là nguyên nhân chính khiến món cuối cùng không render như product card!
+      const lowerTextForProduct = cleanChildTextForProduct.toLowerCase();
+      const hasProductPatternAndTotal = cleanChildTextForProduct.includes(' - ') && 
+                                       cleanChildTextForProduct.match(/[\d.,\s]+[₫đ]/) &&
+                                       (lowerTextForProduct.includes('tổng cộng') || lowerTextForProduct.includes('tổng:'));
+      
+      if (hasProductPatternAndTotal) {
+        // Tìm vị trí của "Tổng cộng" hoặc "Tổng:"
+        const totalIndex = lowerTextForProduct.indexOf('tổng cộng');
+        const totalIndex2 = lowerTextForProduct.indexOf('tổng:');
+        const totalIndexFinal = totalIndex > -1 ? totalIndex : (totalIndex2 > -1 ? totalIndex2 : -1);
+        
+        if (totalIndexFinal > 0) {
+          // Lấy phần trước "Tổng cộng" làm product text
+          const productTextBeforeTotal = cleanChildTextForProduct.substring(0, totalIndexFinal).trim();
+          
+          // Nếu phần trước có pattern "Tên - giá" → Đây là món cuối cùng, dùng text này để extract product
+          if (productTextBeforeTotal.includes(' - ') && productTextBeforeTotal.match(/[\d.,\s]+[₫đ]/)) {
+            // ⚠️ QUAN TRỌNG: Override cleanChildTextForProduct để extract product info từ phần món, không phải phần "Tổng cộng"
+            cleanChildTextForProduct = productTextBeforeTotal;
+          }
+        }
+      }
+      
+      // ✅ Debug: Log để kiểm tra text extraction
+      // console.log('🔍 [li] childText:', childText, 'cleanChildTextForProduct:', cleanChildTextForProduct);
+      
+      // ✅ Kiểm tra xem có phải product không (có pattern "Tên - giá")
+      // ⚠️ QUAN TRỌNG: Phải check TRƯỚC các điều kiện khác để đảm bảo món ăn được nhận diện
+      // ⚠️ QUAN TRỌNG: Logic này phải chạy cho TẤT CẢ các list items, kể cả món cuối cùng
+      // ⚠️ QUAN TRỌNG: Phải nhận diện được CẢ món duy nhất và món cuối cùng
+      let productInfo = extractProductInfo(cleanChildTextForProduct);
+      
+      // ✅ Debug: Log để kiểm tra productInfo extraction
+      // if (!productInfo && cleanChildTextForProduct.includes(' - ') && cleanChildTextForProduct.match(/[\d.,\s]+[₫đ]/)) {
+      //   console.log('⚠️ [li] Failed to extract productInfo for:', cleanChildTextForProduct);
+      // }
+      
+      // ✅ Nếu không match, thử pattern đơn giản nhất: "Tên - giá" (không cần dấu `-` ở đầu)
+      // Pattern này sẽ match ngay cả khi có nhiều dấu `-` trong tên món
+      // ⚠️ QUAN TRỌNG: Phải tìm dấu `-` cuối cùng, không phải dấu đầu tiên
+      if (!productInfo) {
+        // Tìm dấu `-` cuối cùng trước giá (có ₫ hoặc đ)
+        // ⚠️ QUAN TRỌNG: Phải tìm từ cuối lên để xử lý trường hợp có nhiều dấu `-` trong tên món
+        const lastDashIndex = cleanChildTextForProduct.lastIndexOf(' - ');
+        if (lastDashIndex > 0) {
+          // Kiểm tra xem phần sau dấu `-` cuối cùng có phải là giá không
+          const afterLastDash = cleanChildTextForProduct.substring(lastDashIndex + 3).trim();
+          const priceMatch = afterLastDash.match(/^([\d.,\s]+[₫đ])$/i);
+          
+          if (priceMatch) {
+            const price = priceMatch[1].trim();
+            const priceNum = price.replace(/[^\d]/g, '');
+            
+            // Lấy phần trước dấu `-` cuối cùng làm tên món
+            const namePart = cleanChildTextForProduct.substring(0, lastDashIndex).trim();
+            
+            // Loại bỏ các từ khóa thường gặp ở đầu
+            const cleanedName = namePart.replace(/^(giỏ\s*hàng|món|đơn\s*hàng|sản\s*phẩm|item):?\s*/i, '').trim();
+            
+            // Kiểm tra: tên phải có ít nhất 3 ký tự và giá phải có ít nhất 3 chữ số
+            if (cleanedName.length >= 3 && priceNum.length >= 3) {
+              productInfo = {
+                name: cleanedName,
+                price: price
+              };
+            }
+          }
+        }
+      }
+      
+      // ✅ Nếu vẫn không match, thử pattern "Tên - số" (không có ₫)
+      if (!productInfo) {
+        const lastDashIndex = cleanChildTextForProduct.lastIndexOf(' - ');
+        if (lastDashIndex > 0) {
+          const afterLastDash = cleanChildTextForProduct.substring(lastDashIndex + 3).trim();
+          const priceMatch = afterLastDash.match(/^([\d.,\s]+)$/);
+          
+          if (priceMatch) {
+            const priceStr = priceMatch[1].trim();
+            const priceNum = priceStr.replace(/[^\d]/g, '');
+            
+            // Lấy phần trước dấu `-` cuối cùng làm tên món
+            const namePart = cleanChildTextForProduct.substring(0, lastDashIndex).trim();
+            const cleanedName = namePart.replace(/^(giỏ\s*hàng|món|đơn\s*hàng|sản\s*phẩm|item):?\s*/i, '').trim();
+            
+            if (cleanedName.length >= 3 && priceNum.length >= 3) {
+              productInfo = {
+                name: cleanedName,
+                price: `${priceStr}₫`
+              };
+            }
+          }
+        }
+      }
+      
+      // ✅ Nếu vẫn không match, thử pattern đơn giản hơn: chỉ cần có dấu `-` và số ở cuối
+      // Để đảm bảo món cuối cùng và món duy nhất cũng được nhận diện
+      // ⚠️ QUAN TRỌNG: Phải tìm dấu `-` cuối cùng, không phải dấu đầu tiên
+      if (!productInfo) {
+        const lastDashIndexSimple = cleanChildTextForProduct.lastIndexOf(' - ');
+        if (lastDashIndexSimple > 0) {
+          const afterLastDashSimple = cleanChildTextForProduct.substring(lastDashIndexSimple + 3).trim();
+          const priceMatchSimple = afterLastDashSimple.match(/^([\d.,\s]+[₫đ]?)$/);
+          
+          if (priceMatchSimple) {
+            const priceStr = priceMatchSimple[1].trim();
+            const priceNum = priceStr.replace(/[^\d]/g, '');
+            
+            // Lấy phần trước dấu `-` cuối cùng làm tên món
+            const namePart = cleanChildTextForProduct.substring(0, lastDashIndexSimple).trim();
+            const cleanedName = namePart.replace(/^(giỏ\s*hàng|món|đơn\s*hàng|sản\s*phẩm|item):?\s*/i, '').trim();
+            
+            if (cleanedName.length >= 3 && priceNum.length >= 3) {
+              productInfo = {
+                name: cleanedName,
+                price: priceStr.includes('₫') || priceStr.includes('đ') ? priceStr : `${priceStr}₫`
+              };
+            }
+          }
+        }
+      }
+      
+      // ✅ Nếu vẫn không match, thử pattern đơn giản nhất: "Tên - giá" ở bất kỳ đâu
+      // Fallback cuối cùng để đảm bảo món cuối cùng và món duy nhất được nhận diện
+      // ⚠️ QUAN TRỌNG: Phải tìm dấu `-` cuối cùng, không phải dấu đầu tiên
+      // ⚠️ QUAN TRỌNG: Pattern này phải match được TẤT CẢ các món, kể cả món cuối cùng
+      if (!productInfo) {
+        const lastDashIndexFinal = cleanChildTextForProduct.lastIndexOf(' - ');
+        if (lastDashIndexFinal > 0) {
+          const afterLastDashFinal = cleanChildTextForProduct.substring(lastDashIndexFinal + 3).trim();
+          // Pattern linh hoạt hơn: match số có thể có dấu chấm, phẩy, khoảng trắng và có thể có ₫ hoặc đ
+          const priceMatchFinal = afterLastDashFinal.match(/^([\d.,\s]+[₫đ]?)$/);
+          
+          if (priceMatchFinal) {
+            const priceStr = priceMatchFinal[1].trim();
+            const priceNum = priceStr.replace(/[^\d]/g, '');
+            
+            // Lấy phần trước dấu `-` cuối cùng làm tên món
+            const namePart = cleanChildTextForProduct.substring(0, lastDashIndexFinal).trim();
+            const cleanedName = namePart.replace(/^(giỏ\s*hàng|món|đơn\s*hàng|sản\s*phẩm|item):?\s*/i, '').trim();
+            
+            // Kiểm tra: tên phải có ít nhất 3 ký tự và giá phải có ít nhất 3 chữ số
+            if (cleanedName.length >= 3 && priceNum.length >= 3) {
+              productInfo = {
+                name: cleanedName,
+                price: priceStr.includes('₫') || priceStr.includes('đ') ? priceStr : `${priceStr}₫`
+              };
+            }
+          }
+        }
+      }
+      
+      // ✅ Nếu vẫn không match, thử extract trực tiếp từ text với pattern đơn giản nhất
+      // Đảm bảo món cuối cùng và món duy nhất được nhận diện
+      // ⚠️ QUAN TRỌNG: Đây là fallback cuối cùng, phải match được TẤT CẢ các món
+      if (!productInfo && cleanChildTextForProduct.includes(' - ')) {
+        // Pattern đơn giản nhất: Tìm dấu `-` cuối cùng và số ở sau
+        const lastDashIdx = cleanChildTextForProduct.lastIndexOf(' - ');
+        if (lastDashIdx > 0) {
+          const afterDash = cleanChildTextForProduct.substring(lastDashIdx + 3).trim();
+          // Match số có thể có dấu chấm, phẩy, khoảng trắng và có thể có ₫ hoặc đ
+          const pricePattern = /^([\d.,\s]+[₫đ]?)$/;
+          if (pricePattern.test(afterDash)) {
+            const priceStr = afterDash.trim();
+            const priceNum = priceStr.replace(/[^\d]/g, '');
+            const namePart = cleanChildTextForProduct.substring(0, lastDashIdx).trim();
+            const cleanedName = namePart.replace(/^(giỏ\s*hàng|món|đơn\s*hàng|sản\s*phẩm|item):?\s*/i, '').trim();
+            
+            // Kiểm tra: tên phải có ít nhất 3 ký tự và giá phải có ít nhất 3 chữ số
+            if (cleanedName.length >= 3 && priceNum.length >= 3) {
+              productInfo = {
+                name: cleanedName,
+                price: priceStr.includes('₫') || priceStr.includes('đ') ? priceStr : `${priceStr}₫`
+              };
+            }
+          }
+        }
+      }
+      
+      // ✅ Nếu không match, thử tìm trong cache với toàn bộ text
+      if (!productInfo) {
+        const maybeProduct = findProductInCache(cleanChildTextForProduct);
+        if (maybeProduct) {
+          productInfo = {
+            name: maybeProduct.name,
+            price: maybeProduct.price ? `${maybeProduct.price.toLocaleString('vi-VN')}₫` : undefined
+          };
+        }
+      }
+      
+      // ✅ Nếu vẫn không match, kiểm tra xem có phải là tên món đơn thuần không
       let shouldRenderAsProduct = false;
       let productName = '';
       let displayPrice = '';
       
+      // ✅ QUAN TRỌNG: Nếu đã extract được productInfo, LUÔN render như product card
+      // KHÔNG bị block bởi các điều kiện khác (isInfoLine, isQuestion, etc.)
+      // ⚠️ QUAN TRỌNG: Điều này đảm bảo TẤT CẢ các món có pattern "Tên - giá" đều được render như product card
       if (productInfo) {
-        // Có pattern "Tên - giá"
+        // Có pattern "Tên - giá" hoặc tìm thấy trong cache
         productName = productInfo.name;
         displayPrice = productInfo.price || '';
         shouldRenderAsProduct = true;
       } else {
-        // Thử kiểm tra xem có phải là tên món không (không có giá)
-        const cleanText = childText.replace(/\*\*/g, '').replace(/`/g, '').trim();
-        
-        // ✅ Kiểm tra nếu text có vẻ như tên món (không phải số, không phải câu hỏi, có độ dài hợp lý)
-        // Loại bỏ các text không phải tên món
-        const lowerText = cleanText.toLowerCase();
+        // Thử kiểm tra xem có phải là tên món không (không có giá hoặc format khác)
+        const lowerText = cleanChildTextForProduct.toLowerCase();
         const isQuestion = lowerText.includes('bạn muốn') || 
                           lowerText.includes('có thể') ||
                           (lowerText.includes('không') && lowerText.includes('?')) ||
                           lowerText.includes('?') ||
-                          lowerText.match(/^[a-z]+\?/) || // Câu hỏi ngắn
-                          lowerText.startsWith('bạn') && lowerText.length < 20; // Câu hỏi bắt đầu bằng "bạn"
+                          lowerText.match(/^[a-z]+\?/) ||
+                          lowerText.startsWith('bạn') && lowerText.length < 20;
         
-        const isNumberOnly = /^\d+([.,]\d+)?[₫đ]?$/.test(cleanText.trim());
-        const isTooShort = cleanText.length <= 2;
+        const isNumberOnly = /^\d+([.,]\d+)?[₫đ]?$/.test(cleanChildTextForProduct.trim());
+        const isTooShort = cleanChildTextForProduct.length <= 2;
         
-        // ✅ Render TẤT CẢ các text có vẻ như tên món (không phải câu hỏi)
-        if (!isQuestion && !isNumberOnly && !isTooShort && cleanText.length > 2) {
-          // Tìm trong cache
-          const maybeProduct = findProductInCache(cleanText);
+        // ✅ Loại bỏ các text không phải tên món
+        // ⚠️ QUAN TRỌNG: CHỈ block text bắt đầu bằng "tôi đã thu thập" VÀ không có pattern "Tên - giá"
+        // Vì các list items bên dưới có thể chứa "tôi đã thu thập" trong context nhưng vẫn là tên món
+        // ⚠️ QUAN TRỌNG: KHÔNG block các list items có pattern "Tên - giá" ngay cả khi có từ "tôi đã thu thập" trong context
+        const isInfoLine = lowerText.includes('thông tin liên hệ') ||
+                          lowerText.includes('số điện thoại') ||
+                          lowerText.includes('địa chỉ') ||
+                          lowerText.includes('ghi chú') ||
+                          lowerText.includes('tổng cộng') ||
+                          lowerText.includes('tổng:') ||
+                          lowerText.startsWith('bạn có muốn') ||
+                          lowerText.startsWith('bạn muốn xác nhận') ||
+                          (lowerText.startsWith('tôi đã thu thập') && !cleanChildTextForProduct.includes(' - ')); // CHỈ block nếu là dòng "Tôi đã thu thập" không có pattern "Tên - giá"
+        
+        // ✅ Render nếu text có vẻ như tên món (không phải câu hỏi, không phải thông tin)
+        // ⚠️ QUAN TRỌNG: Phải check pattern "Tên - giá" TRƯỚC khi check isInfoLine để đảm bảo món cuối cùng được nhận diện
+        // Kiểm tra xem có pattern "Tên - giá" không (ngay cả khi có từ "tôi đã thu thập" trong context)
+        const hasProductPattern = cleanChildTextForProduct.includes(' - ') && 
+                                  cleanChildTextForProduct.match(/[\d.,\s]+[₫đ]/);
+        
+        if (hasProductPattern || (!isQuestion && !isNumberOnly && !isTooShort && !isInfoLine && cleanChildTextForProduct.length > 2)) {
+          // ✅ Thử pattern linh hoạt: Tìm dấu `-` cuối cùng trước giá
+          // ⚠️ QUAN TRỌNG: Phải tìm từ cuối lên để xử lý trường hợp có nhiều dấu `-` trong tên món
+          const lastDashIndex = cleanChildTextForProduct.lastIndexOf(' - ');
+          if (lastDashIndex > 0) {
+            const afterLastDash = cleanChildTextForProduct.substring(lastDashIndex + 3).trim();
+            const priceMatch = afterLastDash.match(/^([\d.,\s]+[₫đ]?)$/i);
+            
+            if (priceMatch) {
+              const priceStr = priceMatch[1].trim();
+              const priceNum = priceStr.replace(/[^\d]/g, '');
+              
+              // Lấy phần trước dấu `-` cuối cùng làm tên món
+              const namePart = cleanChildTextForProduct.substring(0, lastDashIndex).trim();
+              const cleanedName = namePart.replace(/^(giỏ\s*hàng|món|đơn\s*hàng|sản\s*phẩm|item):?\s*/i, '').trim();
+              
+              if (cleanedName.length >= 3 && priceNum.length >= 3) {
+                productName = cleanedName;
+                displayPrice = priceStr.includes('₫') || priceStr.includes('đ') ? priceStr : `${priceStr}₫`;
+                shouldRenderAsProduct = true;
+              }
+            }
+          }
+          
+          // ✅ Nếu chưa match, thử tìm trong cache với tên món
+          if (!shouldRenderAsProduct) {
+            const maybeProduct = findProductInCache(cleanChildTextForProduct);
           if (maybeProduct) {
             productName = maybeProduct.name;
             displayPrice = maybeProduct.price ? `${maybeProduct.price.toLocaleString('vi-VN')}₫` : '';
             shouldRenderAsProduct = true;
           } else {
-            // ✅ Nếu không tìm thấy trong cache, VẪN render thành product card
-            // (để đảm bảo TẤT CẢ món đều hiển thị)
-            // Chỉ render nếu text có vẻ như tên món (có ít nhất 2 từ hoặc 1 từ dài)
-            const words = cleanText.split(/\s+/).filter(w => w.length > 1);
+              // ✅ Fallback: Render nếu text có vẻ như tên món
+              const words = cleanChildTextForProduct.split(/\s+/).filter(w => w.length > 1);
             const wordCount = words.length;
             const hasLongWord = words.some(w => w.length > 5);
             
-            // Render nếu: có ít nhất 2 từ HOẶC có 1 từ dài (ví dụ: "CanhCuaCàPháo")
-            if (wordCount >= 2 || (wordCount === 1 && hasLongWord) || cleanText.length > 8) {
-              productName = cleanText;
+              if ((wordCount >= 2 || (wordCount === 1 && hasLongWord) || cleanChildTextForProduct.length > 8) && !isInfoLine) {
+                productName = cleanChildTextForProduct;
               shouldRenderAsProduct = true;
+              }
             }
           }
         }
@@ -1553,6 +2789,29 @@ const ChatBox: React.FC = () => {
     const messageToSend = customMessage || input.trim();
     if (!messageToSend) return;
 
+    // ✅ Protection: Prevent duplicate requests
+    const now = Date.now();
+    const timeSinceLastSend = now - lastSentTimeRef.current;
+    const isDuplicateMessage = messageToSend === lastSentMessageRef.current && timeSinceLastSend < 2000; // 2 seconds debounce
+    
+    if (isSendingRef.current) {
+      console.warn('⚠️ Request already in progress, ignoring duplicate send');
+      return;
+    }
+    
+    if (isDuplicateMessage) {
+      console.warn('⚠️ Duplicate message detected, ignoring:', {
+        message: messageToSend,
+        timeSinceLastSend: timeSinceLastSend + 'ms'
+      });
+      return;
+    }
+
+    // ✅ Set flags to prevent duplicate
+    isSendingRef.current = true;
+    lastSentMessageRef.current = messageToSend;
+    lastSentTimeRef.current = now;
+
     // Ẩn FAQ khi người dùng bắt đầu chat
     setShowFAQ(false);
 
@@ -1568,12 +2827,46 @@ const ChatBox: React.FC = () => {
     
     // ✅ Kiểm tra xem user có đang yêu cầu đặt hàng hoặc hỏi về giỏ hàng không
     // Mở rộng pattern matching để bắt nhiều cách hỏi hơn
-    const isOrderRequest = /đặt|order|đơn hàng|thanh toán|checkout/i.test(messageToSend);
+    const isOrderRequest = /đặt|order|đơn hàng|thanh toán|checkout|tôi muốn đặt/i.test(messageToSend);
     const isCartQuery = /giỏ hàng|cart|xem giỏ|món trong giỏ|món nào|món ăn nào|có gì trong giỏ|bạn có|tôi có/i.test(messageToSend);
     
-    // ✅ Nếu có cart và user hỏi về bất kỳ điều gì liên quan đến món ăn/giỏ hàng, LUÔN gửi cart
-    // Để AI có thể trả lời chính xác về cart hiện tại
-    const shouldSendCart = cartData && (isOrderRequest || isCartQuery || cartData.items.length > 0);
+    // ✅ QUAN TRỌNG: Nếu user yêu cầu đặt hàng và có cart, ĐẢM BẢO sync cart lên server TRƯỚC
+    // Để tránh mất món khi AI gọi "carts Find" và trả về cart rỗng
+    // ⚠️ PHẢI đợi sync hoàn thành TRƯỚC KHI gửi chat request
+    if (isOrderRequest && cartData && cartData.items.length > 0) {
+      try {
+        const cartItems = JSON.parse(localStorage.getItem('cartItems') || '[]');
+        
+        // Tính total từ cartItems
+        const total = cartItems.reduce((sum: number, item: any) => {
+          return sum + (item.product?.price || item.combo?.price || item.price || 0) * (item.quantity || 1);
+        }, 0);
+        
+        // ⚠️ QUAN TRỌNG: Clear debounce timeout nếu có, và sync ngay lập tức
+        if ((window as any).cartSyncTimeout) {
+          clearTimeout((window as any).cartSyncTimeout);
+        }
+        
+        // Gọi API sync cart trực tiếp (đợi hoàn thành, không debounce)
+        const cartService = (await import('../services/cartService')).default;
+        await cartService.saveCart(cartItems);
+        
+        console.log('✅ Cart synced to server before order request:', {
+          itemsCount: cartItems.length,
+          total
+        });
+      } catch (error) {
+        console.error('❌ Failed to sync cart before order:', error);
+        // Vẫn tiếp tục gửi request, nhưng cart từ request sẽ được ưu tiên
+      }
+    }
+    
+    // ✅ QUAN TRỌNG: LUÔN gửi cart nếu có món trong giỏ (kể cả khi user đang nhập địa chỉ)
+    // Để AI luôn thấy cart thực tế và không báo "giỏ hàng trống"
+    // Đặc biệt quan trọng trong flow đặt hàng (khi user nhập địa chỉ, cart vẫn phải được gửi)
+    const shouldSendCart = cartData && 
+                           Array.isArray(cartData.items) && 
+                           cartData.items.length > 0;
 
     // ✅ Lấy token từ localStorage để gửi cho backend
     const token = localStorage.getItem('token');
@@ -1601,23 +2894,38 @@ const ChatBox: React.FC = () => {
           context: {
             // ✅ LUÔN gửi cart data nếu có (khi đặt hàng, hỏi về giỏ hàng, hoặc có món trong giỏ)
             // Để AI luôn thấy cart thực tế (bao gồm món được thêm bằng tay)
+            // ✅ QUAN TRỌNG: Tính toán hasCart và cartItemsCount dựa trên cartData thực tế
             ...(shouldSendCart ? { 
               cart: cartData,
               hasCart: true,
               cartItemsCount: cartData.items.length,
-              cartTotal: cartData.total
-            } : {}),
+              cartTotal: cartData.total || 0
+            } : {
+              // ✅ QUAN TRỌNG: Nếu không có cart, PHẢI gửi hasCart = false để backend tính đúng
+              hasCart: false,
+              cartItemsCount: 0,
+              cartTotal: 0
+            }),
           },
           // ✅ Gửi cart ở root level để AI dễ truy cập (ưu tiên cao)
+          // ✅ QUAN TRỌNG: Tính toán hasCart và cartItemsCount dựa trên cartData thực tế
           ...(shouldSendCart ? { 
             cart: cartData,
             metadata: {
               hasCart: true,
               cartItemsCount: cartData.items.length,
-              cartTotal: cartData.total,
+              cartTotal: cartData.total || 0,
               source: 'localStorage' // Đánh dấu cart từ localStorage (cart thực tế)
             }
-          } : {}),
+          } : {
+            // ✅ QUAN TRỌNG: Nếu không có cart, PHẢI gửi metadata với hasCart = false để backend tính đúng
+            metadata: {
+              hasCart: false,
+              cartItemsCount: 0,
+              cartTotal: 0,
+              source: 'localStorage'
+            }
+          }),
         }),
       });
 
@@ -1626,10 +2934,145 @@ const ChatBox: React.FC = () => {
         throw new Error(errorData.reply || `Lỗi ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      // Parse response
+      const responseText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (error) {
+        console.error('❌ Failed to parse JSON response:', error);
+        throw new Error('Không thể parse response từ server');
+      }
 
-      const reply = data.reply || 'Xin lỗi, tôi không thể trả lời ngay bây giờ.';
+      // ⚠️ CỰC KỲ QUAN TRỌNG: Đảm bảo reply KHÔNG rỗng
+      let reply = data.reply || 'Xin lỗi, tôi không thể trả lời ngay bây giờ.';
+      
+      // ✅ Loại bỏ các dòng sản phẩm bị lặp lại (ví dụ: cùng món xuất hiện cả dạng bullet và text)
+      reply = removeDuplicateProductLines(reply);
+      
+      // ✅ Loại bỏ JSON data khỏi reply text (nếu có) - để tránh hiển thị JSON trong chat
+      // Pattern: tìm và loại bỏ các block JSON như { "id": "...", "orderCode": "...", ... }
+      reply = reply.replace(/\{[\s\S]*?"orderCode"[\s\S]*?\}/g, '').trim();
+      reply = reply.replace(/\{[\s\S]*?"id"[\s\S]*?"orderCode"[\s\S]*?\}/g, '').trim();
+      // Loại bỏ các dòng có chứa JSON structure
+      const lines = reply.split('\n');
+      const cleanedLines = lines.filter(line => {
+        const trimmed = line.trim();
+        // Loại bỏ dòng có chứa JSON structure (có nhiều dấu ngoặc nhọn, dấu phẩy, dấu hai chấm)
+        if (trimmed.startsWith('{') && trimmed.includes('"') && trimmed.includes(':')) {
+          return false;
+        }
+        // Loại bỏ dòng có chứa các field JSON như "id", "orderCode", "productid", v.v.
+        if (trimmed.match(/^\s*"[^"]+"\s*:\s*"[^"]+"\s*,?\s*$/)) {
+          return false;
+        }
+        return true;
+      });
+      reply = cleanedLines.join('\n').trim();
+      
+      // Kiểm tra nếu reply rỗng hoặc chỉ có khoảng trắng
+      if (!reply || reply.trim() === '') {
+        reply = 'Đã thêm món vào giỏ hàng thành công.';
+      }
+      
       const normalizedContext = normalizeChatContext(data.context || null);
+
+      const activeSessionId = data.sessionId || currentSessionId;
+      setSessionId(activeSessionId);
+      sessionStorage.setItem('n8n_session_id', activeSessionId);
+
+      // ✅ Helper để transform items từ backend (có product/combo object) sang format cho OrderInfoCard
+      const transformOrderItems = (items: any[]) => {
+        if (!items || !Array.isArray(items)) return [];
+        return items.map((item: any) => {
+          // ✅ Lấy thông tin từ product hoặc combo object
+          const product = item.product;
+          const combo = item.combo;
+          
+          return {
+            id: item.id,
+            name: product?.name || combo?.name || item.name || 'N/A',
+            price: item.price || product?.price || combo?.price || 0,
+            quantity: item.quantity || 1,
+            image: product?.image || combo?.image || item.image || null,
+            productId: item.productId || product?.id,
+            comboId: item.comboId || combo?.id,
+            // ✅ Giữ nguyên product và combo object để có thể dùng sau
+            product: product,
+            combo: combo,
+          };
+        });
+      };
+
+      // ✅ Extract order data từ response (có thể từ data.order hoặc data.data)
+      let orderData: OrderData | undefined = undefined;
+      if (data.order) {
+        console.log('📦 Found order data in data.order:', {
+          orderCode: data.order.orderCode,
+          hasQrCode: !!data.order.qrCode,
+          qrCodeUrl: data.order.qrCode?.qrCodeUrl,
+          qrCodeKeys: data.order.qrCode ? Object.keys(data.order.qrCode) : []
+        });
+        orderData = {
+          id: data.order.id,
+          orderCode: data.order.orderCode,
+          total: data.order.total,
+          qrCode: data.order.qrCode || data.data?.qrCode,
+          paymentStatus: data.order.paymentStatus,
+          status: data.order.status,
+          items: transformOrderItems(data.order.items),
+          phoneNumber: data.order.phoneNumber,
+          address: data.order.address,
+          provinceName: data.order.provinceName,
+          districtName: data.order.districtName,
+          wardName: data.order.wardName,
+          note: data.order.note,
+          createdAt: data.order.createdAt,
+        };
+      } else if (data.data) {
+        // Kiểm tra nếu data.data có orderCode (đây là order response)
+        if (data.data.orderCode || data.data.id) {
+          console.log('📦 Found order data in data.data:', {
+            orderCode: data.data.orderCode,
+            hasQrCode: !!data.data.qrCode,
+            qrCodeUrl: data.data.qrCode?.qrCodeUrl,
+            qrCodeKeys: data.data.qrCode ? Object.keys(data.data.qrCode) : []
+          });
+          orderData = {
+            id: data.data.id,
+            orderCode: data.data.orderCode,
+            total: data.data.total,
+            qrCode: data.data.qrCode,
+            paymentStatus: data.data.paymentStatus,
+            status: data.data.status,
+            items: transformOrderItems(data.data.items),
+            phoneNumber: data.data.phoneNumber,
+            address: data.data.address,
+            provinceName: data.data.provinceName,
+            districtName: data.data.districtName,
+            wardName: data.data.wardName,
+            note: data.data.note,
+            createdAt: data.data.createdAt,
+          };
+        }
+      }
+      
+      // ⚠️ Debug: Log final orderData để kiểm tra
+      if (orderData) {
+        console.log('✅ Final orderData to render:', {
+          orderCode: orderData.orderCode,
+          hasQrCode: !!orderData.qrCode,
+          qrCodeUrl: orderData.qrCode?.qrCodeUrl,
+          qrCodeKeys: orderData.qrCode ? Object.keys(orderData.qrCode) : []
+        });
+      } else {
+        console.log('⚠️ No orderData found in response');
+        console.log('📋 Response structure:', {
+          hasOrder: !!data.order,
+          hasData: !!data.data,
+          dataKeys: Object.keys(data || {})
+        });
+      }
 
       // ✅ ĐỒNG BỘ CART TỪ AI RESPONSE VỀ FRONTEND
       // Nếu AI trả về cart data (khi thêm/xem/cập nhật/xóa giỏ hàng), sync vào localStorage
@@ -1638,36 +3081,73 @@ const ChatBox: React.FC = () => {
       } else if (data.context?.cart) {
         syncCartFromAI(data.context.cart);
       } else {
-        // ✅ Nếu không có cart data nhưng reply có từ khóa đặt hàng thành công
-        // → Clear cart trong localStorage để đồng bộ với database
-        const replyLower = reply.toLowerCase();
-        const isOrderSuccess = replyLower.includes('đặt thành công') || 
-                               replyLower.includes('đã đặt thành công') ||
-                               replyLower.includes('mã đơn') ||
-                               replyLower.includes('order code') ||
-                               replyLower.includes('giỏ hàng đã được làm trống') ||
-                               replyLower.includes('đã được làm trống');
-        const isClearCart = replyLower.includes('xóa toàn bộ') || 
-                            replyLower.includes('xóa hết giỏ hàng') || 
-                            replyLower.includes('làm trống giỏ hàng') ||
-                            replyLower.includes('clear cart') ||
-                            replyLower.includes('đã xóa toàn bộ');
-        
-        if (isOrderSuccess || isClearCart) {
-          console.log('✅ Phát hiện từ khóa đặt hàng thành công/xóa giỏ hàng trong reply, clear cart trong localStorage');
+        // ✅ QUAN TRỌNG: Nếu có order data (đơn hàng đã được tạo thành công) → Clear cart
+        if (orderData && orderData.orderCode) {
+          console.log('✅ Phát hiện order data trong response, clear cart trong localStorage');
           syncCartFromAI({ items: [], total: 0 });
+          // ✅ Gọi API để clear cart trên server (backup solution)
+          try {
+            const token = localStorage.getItem('token');
+            if (token) {
+              await fetch(`${API_URL}/api/cart`, {
+                method: 'DELETE',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+              });
+              console.log('✅ Cart cleared on server via API');
+            }
+          } catch (error) {
+            console.error('⚠️ Error clearing cart on server (non-critical):', error);
+          }
+        } else {
+          // ✅ Nếu không có order data nhưng reply có từ khóa đặt hàng thành công
+          // → Clear cart trong localStorage để đồng bộ với database
+          const replyLower = reply.toLowerCase();
+          const isOrderSuccess = replyLower.includes('đặt thành công') || 
+                                 replyLower.includes('đã đặt thành công') ||
+                                 replyLower.includes('mã đơn') ||
+                                 replyLower.includes('order code') ||
+                                 replyLower.includes('giỏ hàng đã được làm trống') ||
+                                 replyLower.includes('đã được làm trống');
+          const isClearCart = replyLower.includes('xóa toàn bộ') || 
+                              replyLower.includes('xóa hết giỏ hàng') || 
+                              replyLower.includes('làm trống giỏ hàng') ||
+                              replyLower.includes('clear cart') ||
+                              replyLower.includes('đã xóa toàn bộ');
+          
+          if (isOrderSuccess || isClearCart) {
+            console.log('✅ Phát hiện từ khóa đặt hàng thành công/xóa giỏ hàng trong reply, clear cart trong localStorage');
+            syncCartFromAI({ items: [], total: 0 });
+            // ✅ Gọi API để clear cart trên server
+            try {
+              const token = localStorage.getItem('token');
+              if (token) {
+                await fetch(`${API_URL}/api/cart`, {
+                  method: 'DELETE',
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                  },
+                });
+                console.log('✅ Cart cleared on server via API');
+              }
+            } catch (error) {
+              console.error('⚠️ Error clearing cart on server (non-critical):', error);
+            }
+          }
         }
       }
 
-      const activeSessionId = data.sessionId || currentSessionId;
-      setSessionId(activeSessionId);
-      sessionStorage.setItem('n8n_session_id', activeSessionId);
-
-      setMessages(prev => [...prev, { 
+      const newMessage = { 
         text: reply,
         isUser: false,
         context: normalizedContext,
-      }]);
+        orderData: orderData, // ✅ Thêm order data để hiển thị QR code
+      };
+
+      setMessages(prev => [...prev, newMessage]);
     } catch (error) {
       console.error('Error sending message to N8N:', error);
       const errorMessage = error instanceof Error ? error.message : 'Xin lỗi, đã có lỗi xảy ra khi kết nối với trợ lý.';
@@ -1677,6 +3157,8 @@ const ChatBox: React.FC = () => {
       }]);
     } finally {
       setIsLoading(false);
+      // ✅ Reset flag để cho phép request tiếp theo
+      isSendingRef.current = false;
     }
   };
 
@@ -2072,25 +3554,97 @@ const ChatBox: React.FC = () => {
                 </div>
               </div>
             )}
-            {messages.map((message, index) => (
-              <div
-                key={`message-${index}`}
+            {messages.map((message, index) => {
+              // ⚠️ QUAN TRỌNG: Đảm bảo message.text không rỗng trước khi render
+              const messageText = message.text || '';
+              const hasContent = messageText.trim() || message.context;
+              
+              // Bỏ qua message hoàn toàn rỗng
+              if (!hasContent) {
+                return null;
+              }
+              
+              // Tạo key tốt hơn để tránh re-render không cần thiết
+              const messageKey = message.isUser 
+                ? `user-${index}-${messageText.substring(0, 20)}`
+                : `ai-${index}-${messageText.substring(0, 20)}`;
+              
+              return (
+                <div
+                  key={messageKey}
                 className={`message ${message.isUser ? 'user' : 'ai'}`}
               >
                 <div className="message-content">
+                    {messageText.trim() && (
                   <div className="message-text">
+                        {/* ⚠️ DEBUG: Log message text trước khi render */}
                     <ReactMarkdown components={message.isUser ? undefined : markdownComponents}>
-                      {message.text}
+                           {messageText}
                     </ReactMarkdown>
                   </div>
+                    )}
                   {message.context && (
                     <div className="message-context">
                       {renderProducts(message.context)}
                     </div>
                   )}
+                    {/* ✅ Hiển thị QR code nếu có order data */}
+                    {/* ✅ Hiển thị QR code nếu có order data và có qrCode */}
+                    {message.orderData && message.orderData.qrCode && (
+                      <QRCodePaymentCard 
+                        orderData={message.orderData}
+                        onPaymentConfirmed={(orderData) => {
+                          // Cập nhật orderData trong message khi thanh toán thành công
+                          setMessages(prev => prev.map(msg => 
+                            msg === message 
+                              ? { ...msg, orderData: { ...msg.orderData, paymentStatus: 'PAID' } }
+                              : msg
+                          ));
+                          
+                          // ✅ Tự động thêm message mới với câu "Đây là đơn hàng của bạn, hãy xem lại nếu muốn." và hiển thị OrderInfoCard
+                          // ⚠️ QUAN TRỌNG: Kiểm tra xem message đã được thêm chưa để tránh duplicate
+                          setTimeout(() => {
+                            setMessages(prev => {
+                              // Kiểm tra xem đã có message với text "Đây là đơn hàng của bạn" và cùng orderCode chưa
+                              const existingMessage = prev.find(msg => 
+                                !msg.isUser && 
+                                msg.text?.includes('Đây là đơn hàng của bạn') &&
+                                msg.orderData?.orderCode === orderData.orderCode &&
+                                !msg.orderData?.qrCode // Chỉ check message không có qrCode (đã là OrderInfoCard)
+                              );
+                              
+                              // Nếu đã có message rồi, không thêm nữa
+                              if (existingMessage) {
+                                console.log('⚠️ Message đã tồn tại, không thêm duplicate');
+                                return prev;
+                              }
+                              
+                              // Thêm message mới
+                              return [...prev, {
+                                id: `order-${orderData.orderCode}-${Date.now()}`,
+                                text: 'Đây là đơn hàng của bạn, hãy xem lại nếu muốn.',
+                                isUser: false,
+                                timestamp: new Date(),
+                                orderData: {
+                                  ...orderData,
+                                  paymentStatus: 'PAID',
+                                  // Xóa qrCode để hiển thị OrderInfoCard thay vì QRCodePaymentCard
+                                  qrCode: undefined
+                                }
+                              }];
+                            });
+                          }, 500); // Delay 500ms để đảm bảo message trước đã được cập nhật
+                        }}
+                      />
+                    )}
+                    {/* ✅ Hiển thị thông tin đơn hàng nếu có order data (khi tra cứu đơn hàng) */}
+                    {message.orderData && message.orderData.orderCode && !message.orderData.qrCode && (
+                      <OrderInfoCard orderData={message.orderData} />
+                  )}
                 </div>
               </div>
-            ))}
+              );
+            })}
             {isLoading && (
               <div className="message ai">
                 <div className="message-content typing">

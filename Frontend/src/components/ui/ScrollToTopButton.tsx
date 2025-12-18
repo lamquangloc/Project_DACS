@@ -27,7 +27,7 @@ const ScrollToTopButton: React.FC = () => {
       className="scroll-to-top-btn"
       onClick={handleScrollTop}
       aria-label="Scroll to top"
-      style={{position: 'fixed', right: 32, bottom: 32, zIndex: 9999, background: 'none', border: 'none', outline: 'none', cursor: 'pointer', padding: 0}}
+      style={{position: 'fixed', right: 32, bottom: 32, zIndex: 999, background: 'none', border: 'none', outline: 'none', cursor: 'pointer', padding: 0}}
     >
       <svg width="48" height="48" viewBox="0 0 48 48">
         <circle cx="24" cy="24" r="20" stroke="#222" strokeWidth="3" fill="none" opacity="0.18" />

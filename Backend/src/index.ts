@@ -21,6 +21,7 @@ import unitRoutes from './routes/unitRoutes';
 import dashboardRoutes from './routes/dashboard.route';
 import n8nChatRoutes from './routes/n8nChat';
 import cartRoutes from './routes/cart.routes';
+import paymentRoutes from './routes/payment.routes';
 
 // Thêm import router AI chat (dùng require để tránh lỗi type)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -120,6 +121,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/ai', aiChatRoutes);
 app.use('/api/n8n', n8nChatRoutes);
 app.use('/api/cart', cartRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Error handling
 app.use(errorHandler);

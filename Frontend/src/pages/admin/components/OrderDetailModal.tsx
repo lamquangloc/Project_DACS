@@ -63,24 +63,86 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         setProvinceCode(order.provinceCode || '');
         setDistrictCode(order.districtCode || '');
         setWardCode(order.wardCode || '');
-        setProvinceName(order.provinceName || '');
-        setDistrictName(order.districtName || '');
-        setWardName(order.wardName || '');
         setAddressDetail(order.address || '');
 
-        if (order.provinceCode) {
-          const res1 = await fetch(`https://provinces.open-api.vn/api/p/${order.provinceCode}?depth=2`);
-          const data1 = await res1.json();
-          setDistrictList(data1.districts || []);
-          if (order.districtCode) {
-            const res2 = await fetch(`https://provinces.open-api.vn/api/d/${order.districtCode}?depth=2`);
-            const data2 = await res2.json();
-            setWardList(data2.wards || []);
-            if (order.wardCode) {
-              const selectedWard = (data2.wards || []).find((w: any) => String(w.code) === String(order.wardCode) || w.code === order.wardCode);
-              setWardName(selectedWard ? selectedWard.name : '');
+        // ⚠️ QUAN TRỌNG: Luôn fetch name từ API nếu có code, đảm bảo luôn có name thay vì hiển thị code
+        // Ưu tiên wardCode → từ ward suy ra đúng quận & tỉnh (tránh case Thủ Đức bị thành Quận 12 nếu districtCode sai)
+        // Use new API open.oapi.vn
+        const { getFullAddressFromWardId, getDistrictsByProvinceId, getWardsByDistrictId, getProvinceById } = await import('../../../utils/oapi-vn');
+        
+        if (order.wardCode && order.districtCode) {
+          try {
+            // Nếu có wardCode và districtCode thì dùng API để lấy đầy đủ ward/district/province
+            const fullAddress = await getFullAddressFromWardId(order.wardCode, order.districtCode);
+            if (fullAddress) {
+              if (fullAddress.ward) {
+                setWardName(fullAddress.ward.name);
+                setWardList([fullAddress.ward]);
+              }
+              if (fullAddress.district) {
+                setDistrictName(fullAddress.district.name);
+                setDistrictCode(fullAddress.district.id);
+                setDistrictList([fullAddress.district]);
+                // Load wards for this district
+                const wards = await getWardsByDistrictId(fullAddress.district.id);
+                setWardList(wards);
+              }
+              if (fullAddress.province) {
+                setProvinceName(fullAddress.province.name);
+                setProvinceCode(fullAddress.province.id);
+                setProvinceList([fullAddress.province]);
+                // Load districts for this province
+                const districts = await getDistrictsByProvinceId(fullAddress.province.id);
+                setDistrictList(districts);
+              }
             }
+          } catch (error) {
+            console.error('Error fetching ward:', error);
+            // Fallback: dùng name từ order nếu có
+            setWardName(order.wardName || '');
+            setDistrictName(order.districtName || '');
+            setProvinceName(order.provinceName || '');
           }
+        } else if (order.districtCode && order.provinceCode) {
+          // Fallback: không có wardCode, dùng districtCode và provinceCode
+          try {
+            const districts = await getDistrictsByProvinceId(order.provinceCode);
+            const district = districts.find(d => d.id === order.districtCode);
+            if (district) {
+              setDistrictName(district.name);
+              setDistrictList(districts);
+              const wards = await getWardsByDistrictId(district.id);
+              setWardList(wards);
+            }
+            const province = await getProvinceById(order.provinceCode);
+            if (province) {
+              setProvinceName(province.name);
+              setProvinceCode(province.id);
+            }
+          } catch (error) {
+            console.error('Error fetching district:', error);
+            setDistrictName(order.districtName || '');
+            setProvinceName(order.provinceName || '');
+          }
+        } else if (order.provinceCode) {
+          // Fallback: chỉ có provinceCode
+          try {
+            const province = await getProvinceById(order.provinceCode);
+            if (province) {
+              setProvinceName(province.name);
+              setProvinceCode(province.id);
+              const districts = await getDistrictsByProvinceId(province.id);
+              setDistrictList(districts);
+            }
+          } catch (error) {
+            console.error('Error fetching province:', error);
+            setProvinceName(order.provinceName || '');
+          }
+        } else {
+          // Nếu không có code nào, dùng name từ order
+          setProvinceName(order.provinceName || '');
+          setDistrictName(order.districtName || '');
+          setWardName(order.wardName || '');
         }
       }
     }
@@ -101,20 +163,25 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
   // Fetch provinces on mount
   useEffect(() => {
-    fetch('https://provinces.open-api.vn/api/p/')
-      .then(res => res.json())
-      .then(data => setProvinceList(data));
+    // Use new API open.oapi.vn
+    import('../../../utils/oapi-vn').then(({ getProvinces }) => {
+      getProvinces().then(data => setProvinceList(data));
+    });
   }, []);
 
   // Fetch districts when province changes
   useEffect(() => {
     if (provinceCode) {
       setLoadingAddress(true);
-      fetch(`https://provinces.open-api.vn/api/p/${provinceCode}?depth=2`)
-        .then(res => res.json())
-        .then(data => {
-          setDistrictList(data.districts || []);
-          setProvinceName(data.name);
+      // Use new API open.oapi.vn
+      import('../../../utils/oapi-vn').then(({ getDistrictsByProvinceId }) => {
+        getDistrictsByProvinceId(provinceCode).then(districts => {
+          setDistrictList(districts);
+          // Find province name from provinceList
+          const province = provinceList.find(p => p.id === provinceCode);
+          if (province) {
+            setProvinceName(province.name);
+          }
           if (!order || !order.districtCode || String(order.provinceCode) !== String(provinceCode)) {
             setDistrictCode('');
             setWardCode('');
@@ -122,6 +189,7 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           }
           setLoadingAddress(false);
         });
+      });
     } else {
       setDistrictList([]);
       setDistrictCode('');
@@ -134,16 +202,21 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   useEffect(() => {
     if (districtCode) {
       setLoadingAddress(true);
-      fetch(`https://provinces.open-api.vn/api/d/${districtCode}?depth=2`)
-        .then(res => res.json())
-        .then(data => {
-          setWardList(data.wards || []);
-          setDistrictName(data.name);
+      // Use new API open.oapi.vn
+      import('../../../utils/oapi-vn').then(({ getWardsByDistrictId }) => {
+        getWardsByDistrictId(districtCode).then(wards => {
+          setWardList(wards);
+          // Find district name from districtList
+          const district = districtList.find(d => d.id === districtCode);
+          if (district) {
+            setDistrictName(district.name);
+          }
           if (!order || !order.wardCode || String(order.districtCode) !== String(districtCode)) {
             setWardCode('');
           }
           setLoadingAddress(false);
         });
+      });
     } else {
       setWardList([]);
       setWardCode('');
@@ -153,7 +226,7 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   // Set ward name
   useEffect(() => {
     if (wardCode && wardList.length > 0) {
-      const ward = wardList.find(w => String(w.code) === String(wardCode));
+      const ward = wardList.find(w => String(w.id) === String(wardCode));
       setWardName(ward ? ward.name : '');
     } else {
       setWardName('');
@@ -568,7 +641,7 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               value={provinceCode || undefined}
               onChange={value => {
                 setProvinceCode(String(value));
-                const selected = provinceList.find(p => String(p.code) === String(value));
+                const selected = provinceList.find(p => String(p.id) === String(value));
                 setProvinceName(selected ? selected.name : '');
                 setDistrictCode('');
                 setDistrictName('');
@@ -579,7 +652,7 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               optionFilterProp="children"
             >
               {provinceList.map((p) => (
-                <Option key={p.code} value={String(p.code)}>{p.name}</Option>
+                <Option key={p.id} value={String(p.id)}>{p.name}</Option>
               ))}
             </Select>
             <Select
@@ -588,7 +661,7 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               value={districtCode || undefined}
               onChange={value => {
                 setDistrictCode(String(value));
-                const selected = districtList.find(d => String(d.code) === String(value));
+                const selected = districtList.find(d => String(d.id) === String(value));
                 setDistrictName(selected ? selected.name : '');
                 setWardCode('');
                 setWardName('');
@@ -598,7 +671,7 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               optionFilterProp="children"
             >
               {districtList.map((d) => (
-                <Option key={d.code} value={String(d.code)}>{d.name}</Option>
+                <Option key={d.id} value={String(d.id)}>{d.name}</Option>
               ))}
             </Select>
             <Select
@@ -607,7 +680,7 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               value={wardCode || undefined}
               onChange={value => {
                 setWardCode(String(value));
-                const selected = wardList.find(w => String(w.code) === String(value));
+                const selected = wardList.find(w => String(w.id) === String(value));
                 if (selected && selected.name) {
                   setWardName(selected.name);
                 } else {
@@ -619,7 +692,7 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               optionFilterProp="children"
             >
               {wardList.map((w) => (
-                <Option key={w.code} value={String(w.code)}>{w.name}</Option>
+                <Option key={w.id} value={String(w.id)}>{w.name}</Option>
               ))}
             </Select>
             <label className="block text-sm font-medium text-gray-700 mb-1">Địa chỉ chi tiết</label>

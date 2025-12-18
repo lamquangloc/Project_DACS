@@ -154,6 +154,70 @@ export class OrderService {
     });
   }
 
+  /**
+   * Tìm đơn hàng theo mã đơn (full hoặc 4 số cuối)
+   * @param orderCodeOrSuffix Mã đơn đầy đủ (ORD-20251129-0160) hoặc 4 số cuối (0160 hoặc 160)
+   * @param userId Optional: userId để filter (chỉ lấy đơn của user đó)
+   * @returns Order hoặc null
+   */
+  static async getOrderByCode(orderCodeOrSuffix: string, userId?: string) {
+    // Nếu là mã đơn đầy đủ (có format ORD-YYYYMMDD-XXXX)
+    if (orderCodeOrSuffix.startsWith('ORD-')) {
+      const where: any = { orderCode: orderCodeOrSuffix };
+      if (userId) {
+        where.userId = userId;
+      }
+      return prisma.order.findFirst({
+        where,
+        include: {
+          user: true,
+          items: {
+            include: {
+              product: true,
+              combo: true
+            }
+          }
+        }
+      });
+    }
+
+    // Nếu là 4 số cuối (0160 hoặc 160)
+    // Tìm tất cả đơn hàng có orderCode kết thúc bằng số này
+    const suffix = orderCodeOrSuffix.padStart(4, '0'); // Đảm bảo có 4 chữ số (0160)
+    
+    // Tìm đơn hàng có orderCode kết thúc bằng suffix
+    // Format: ORD-YYYYMMDD-XXXX, cần tìm XXXX = suffix
+    const where: any = {
+      orderCode: {
+        endsWith: `-${suffix}`
+      }
+    };
+    
+    if (userId) {
+      where.userId = userId;
+    }
+
+    // Lấy đơn hàng mới nhất nếu có nhiều đơn cùng suffix
+    const orders = await prisma.order.findMany({
+      where,
+      include: {
+        user: true,
+        items: {
+          include: {
+            product: true,
+            combo: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      take: 1 // Chỉ lấy 1 đơn hàng mới nhất
+    });
+
+    return orders.length > 0 ? orders[0] : null;
+  }
+
   static async getMyOrderById(userId: string, id: string) {
     const order = await prisma.order.findFirst({
       where: { id, userId },

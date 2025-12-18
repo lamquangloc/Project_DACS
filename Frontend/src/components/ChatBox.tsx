@@ -2284,7 +2284,7 @@ const ChatBox: React.FC = () => {
             <div style={{ margin: '8px 0' }}>
               {comboExtract.beforeText && <p style={{ margin: 0 }}>{comboExtract.beforeText}</p>}
               {comboCard}
-            </p>
+            </div>
           );
         }
       }

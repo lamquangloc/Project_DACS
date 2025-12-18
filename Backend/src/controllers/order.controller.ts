@@ -63,12 +63,19 @@ export class OrderController {
 
       // Chuẩn hóa tên + mã tỉnh/thành, quận/huyện, phường/xã từ mã code (nếu có)
       // Ưu tiên wardCode → từ ward suy ra đúng quận & tỉnh (tránh case Thủ Đức bị thành Quận 1 nếu districtCode sai)
+      // ⚠️ Một số client (hoặc n8n) có thể gửi wardCode/districtCode/provinceCode dạng \"=26860\" → cần strip ký tự '=' ở đầu
+      const cleanCode = (value: unknown): string => {
+        if (typeof value === 'number') return String(value);
+        if (typeof value !== 'string') return '';
+        return value.trim().replace(/^=\s*/, '');
+      };
+
       let finalProvinceName = provinceName || '';
       let finalDistrictName = districtName || '';
       let finalWardName = wardName || '';
-      let finalProvinceCode = provinceCode || '';
-      let finalDistrictCode = districtCode || '';
-      let finalWardCode = wardCode || '';
+      let finalProvinceCode = cleanCode(provinceCode);
+      let finalDistrictCode = cleanCode(districtCode);
+      let finalWardCode = cleanCode(wardCode);
 
       try {
         if (wardCode && districtCode) {
@@ -129,12 +136,13 @@ export class OrderController {
           userId,
           total,
           address,
-          provinceCode,
-          provinceName,
-          districtCode,
-          districtName,
-          wardCode,
-          wardName,
+          // ✅ Lưu mã / tên đã được chuẩn hóa
+          provinceCode: finalProvinceCode,
+          provinceName: finalProvinceName,
+          districtCode: finalDistrictCode,
+          districtName: finalDistrictName,
+          wardCode: finalWardCode,
+          wardName: finalWardName,
           phoneNumber,
           note,
           paymentStatus: paymentStatus || 'PENDING',
@@ -250,36 +258,48 @@ export class OrderController {
         wardName
       } = req.body;
 
-      // ✅ Debug: Log tất cả thông tin địa chỉ nhận được từ N8N
+      // ✅ QUAN TRỌNG: Clean TẤT CẢ các field từ N8N (có thể có dấu '=' ở đầu)
+      // N8N có thể gửi: "=userId", "=79", "=0901234567", etc.
+      const cleanValue = (value: unknown): string => {
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'number') return String(value);
+        if (typeof value !== 'string') return '';
+        return value.trim().replace(/^=\s*/, '');
+      };
+
+      // ✅ Clean userId TRƯỚC KHI validate (quan trọng nhất!)
+      const cleanedUserId = cleanValue(userId);
+      
+      // ✅ Debug: Log tất cả thông tin địa chỉ nhận được từ N8N (sau khi clean)
       console.log('📋 Address data received from N8N:', {
-        provinceCode: provinceCode || '(missing)',
-        provinceName: provinceName || '(missing)',
-        districtCode: districtCode || '(missing)',
-        districtName: districtName || '(missing)',
-        wardCode: wardCode || '(missing)',
-        wardName: wardName || '(missing)',
-        address: address || rawAddress || fullAddress || addressText || '(missing)',
-        phoneNumber: phoneNumber || phone || sdt || '(missing)'
+        userId: cleanedUserId || '(missing)',
+        provinceCode: cleanValue(provinceCode) || '(missing)',
+        provinceName: cleanValue(provinceName) || '(missing)',
+        districtCode: cleanValue(districtCode) || '(missing)',
+        districtName: cleanValue(districtName) || '(missing)',
+        wardCode: cleanValue(wardCode) || '(missing)',
+        wardName: cleanValue(wardName) || '(missing)',
+        address: cleanValue(address || rawAddress || fullAddress || addressText) || '(missing)',
+        phoneNumber: cleanValue(phoneNumber || phone || sdt) || '(missing)'
       });
 
       // Chuẩn hóa tên + mã tỉnh/thành, quận/huyện, phường/xã từ mã code (nếu có)
       // Ưu tiên wardCode → từ ward suy ra đúng quận & tỉnh (tránh case Thủ Đức bị thành Quận 1 nếu districtCode sai)
-      let finalProvinceName = provinceName || '';
-      let finalDistrictName = districtName || '';
-      let finalWardName = wardName || '';
-      let finalProvinceCode = provinceCode || '';
-      let finalDistrictCode = districtCode || '';
-      // ✅ Đảm bảo wardCode là string (có thể rỗng nếu N8N không gửi)
-      let finalWardCode = typeof wardCode === 'string' || typeof wardCode === 'number'
-        ? String(wardCode).trim()
-        : '';
+      // ✅ Tất cả các field đã được clean (loại bỏ dấu '=' ở đầu)
+      let finalProvinceName = cleanValue(provinceName);
+      let finalDistrictName = cleanValue(districtName);
+      let finalWardName = cleanValue(wardName);
+      let finalProvinceCode = cleanValue(provinceCode);
+      let finalDistrictCode = cleanValue(districtCode);
+      // ✅ Đảm bảo wardCode là string (có thể rỗng nếu N8N không gửi) và đã strip '=' nếu có
+      let finalWardCode = cleanValue(wardCode);
 
       try {
-        if (finalWardCode && districtCode) {
+        if (finalWardCode && finalDistrictCode) {
           // ⚠️ QUAN TRỌNG: Validate wardCode bằng cách gọi API để đảm bảo wardCode hợp lệ
           // Nếu có wardCode và districtCode thì dùng API để lấy đầy đủ ward/district/province
-          console.log(`🔍 Validating wardCode: ${finalWardCode} with districtCode: ${districtCode}`);
-          const fullAddress = await getFullAddressFromWardId(finalWardCode, districtCode);
+          console.log(`🔍 Validating wardCode: ${finalWardCode} with districtCode: ${finalDistrictCode}`);
+          const fullAddress = await getFullAddressFromWardId(finalWardCode, finalDistrictCode);
           
           if (fullAddress && fullAddress.ward) {
             // ✅ Nếu API trả về đầy đủ, dùng data từ API (đảm bảo tính chính xác)
@@ -303,16 +323,16 @@ export class OrderController {
 
             let resolved = false;
 
-            if (districtCode && wardName) {
+            if (finalDistrictCode && finalWardName) {
               try {
-                const matchedWard = await findWardByName(wardName, districtCode);
+                const matchedWard = await findWardByName(finalWardName, finalDistrictCode);
                 
                 if (matchedWard) {
                   finalWardName = matchedWard.name;
                   finalWardCode = matchedWard.id;
                   
                   // Get district info
-                  const district = await getDistrictById(districtCode);
+                  const district = await getDistrictById(finalDistrictCode);
                   if (district) {
                     finalDistrictName = district.name;
                     finalDistrictCode = district.id;
@@ -331,7 +351,7 @@ export class OrderController {
                     wardNameInput: wardName,
                     finalWardName,
                     finalWardCode,
-                    districtCode,
+                    districtCode: finalDistrictCode,
                   });
                 }
               } catch (fallbackErr) {
@@ -340,8 +360,8 @@ export class OrderController {
             }
 
             if (!resolved) {
-              // Fallback thất bại → trả lỗi rõ ràng
-              console.error(`❌ Could not resolve wardCode via fallback. Giving up.`);
+              // Fallback thất bại → KHÔNG chặn tạo đơn, chỉ log cảnh báo và để trống mã/phường
+              console.error(`❌ Could not resolve wardCode via fallback. Proceeding without ward codes.`);
               console.error(`📋 Full request body for debugging:`, JSON.stringify({
                 wardCode,
                 wardName,
@@ -351,34 +371,25 @@ export class OrderController {
                 provinceName
               }, null, 2));
 
-              return res.status(400).json({
-                success: false,
-                status: 'error',
-                error: 'WardCode not found',
-                message: `Mã phường/xã không tồn tại: ${wardCode}. Vui lòng kiểm tra lại thông tin địa chỉ.`,
-                details: {
-                  wardCode: wardCode,
-                  wardName: wardName || '(missing)',
-                  districtCode: districtCode || '(missing)',
-                  districtName: districtName || '(missing)',
-                  provinceCode: provinceCode || '(missing)',
-                  provinceName: provinceName || '(missing)',
-                  suggestion: 'Có thể wardCode không đúng hoặc không tồn tại trong hệ thống. Vui lòng kiểm tra lại thông tin địa chỉ đã thu thập từ user.'
-                }
-              });
+              finalWardCode = '';
+              finalWardName = cleanValue(wardName);
+              finalDistrictCode = cleanValue(districtCode);
+              finalDistrictName = cleanValue(districtName);
+              finalProvinceCode = cleanValue(provinceCode);
+              finalProvinceName = cleanValue(provinceName);
             }
           }
-        } else if (!finalWardCode && districtCode && wardName) {
+        } else if (!finalWardCode && finalDistrictCode && finalWardName) {
           // Fallback: KHÔNG có wardCode, cố gắng suy ra từ wardName + districtCode
           try {
-            const matchedWard = await findWardByName(wardName, districtCode);
+            const matchedWard = await findWardByName(finalWardName, finalDistrictCode);
             
             if (matchedWard) {
               finalWardName = matchedWard.name;
               finalWardCode = matchedWard.id;
               
               // Get district info
-              const district = await getDistrictById(districtCode);
+              const district = await getDistrictById(finalDistrictCode);
               if (district) {
                 finalDistrictName = district.name;
                 finalDistrictCode = district.id;
@@ -398,8 +409,8 @@ export class OrderController {
               });
             } else {
               console.warn('⚠️ Could not derive wardCode from wardName + districtCode', {
-                wardName,
-                districtCode,
+                wardName: finalWardName,
+                districtCode: finalDistrictCode,
               });
             }
           } catch (err) {
@@ -407,16 +418,16 @@ export class OrderController {
           }
         } else {
           // Fallback: chỉ có districtCode hoặc provinceCode
-          if (districtCode && provinceCode) {
-            const district = await getDistrictById(districtCode, provinceCode);
+          if (finalDistrictCode && finalProvinceCode) {
+            const district = await getDistrictById(finalDistrictCode, finalProvinceCode);
             if (district) {
               finalDistrictName = district.name;
               finalDistrictCode = district.id;
             }
           }
 
-          if (provinceCode) {
-            const province = await getProvinceById(provinceCode);
+          if (finalProvinceCode) {
+            const province = await getProvinceById(finalProvinceCode);
             if (province) {
               finalProvinceName = province.name;
               finalProvinceCode = province.id;
@@ -429,18 +440,16 @@ export class OrderController {
       }
 
       // Gom thông tin địa chỉ / số điện thoại từ nhiều key có thể có trong body (tuỳ n8n mapping)
-      const inputPhoneNumber: string | undefined =
-        phoneNumber || phone || sdt;
-
-      const inputAddressDetail: string | undefined =
-        address || rawAddress || fullAddress || addressText;
+      // ✅ Clean tất cả các field trước khi dùng
+      const inputPhoneNumber: string = cleanValue(phoneNumber || phone || sdt);
+      const inputAddressDetail: string = cleanValue(address || rawAddress || fullAddress || addressText);
 
       // Validation (ít field hơn, phù hợp với chatbot)
       // Kiểm tra totalAmount/total: phải là số và > 0 (không chỉ truthy)
       const finalTotal = totalAmount !== undefined && totalAmount !== null ? Number(totalAmount) : (total !== undefined && total !== null ? Number(total) : null);
       
       // Kiểm tra tất cả điều kiện
-      if (!userId) {
+      if (!cleanedUserId) {
         return res.status(400).json({
           success: false,
           status: 'error',
@@ -448,7 +457,8 @@ export class OrderController {
           message: 'Thiếu thông tin bắt buộc: userId',
           details: {
             hasUserId: false,
-            userId: userId
+            userId: userId,
+            cleanedUserId: cleanedUserId
           }
         });
       }
@@ -457,7 +467,7 @@ export class OrderController {
       // Tránh lỗi Prisma "Field user is required to return data, got `null` instead"
       try {
         const userExists = await prisma.user.findUnique({
-          where: { id: userId },
+          where: { id: cleanedUserId },
           select: { id: true }
         });
 
@@ -466,9 +476,10 @@ export class OrderController {
             success: false,
             status: 'error',
             error: 'Invalid userId',
-            message: `User với userId "${userId}" không tồn tại trong hệ thống`,
+            message: `User với userId "${cleanedUserId}" không tồn tại trong hệ thống`,
             details: {
               userId: userId,
+              cleanedUserId: cleanedUserId,
               suggestion: 'Kiểm tra lại userId được gửi từ N8N. Có thể userId bị lấy từ Simple Memory hoặc context cũ.'
             }
           });
@@ -482,6 +493,7 @@ export class OrderController {
           message: 'Lỗi khi kiểm tra userId trong database',
           details: {
             userId: userId,
+            cleanedUserId: cleanedUserId,
             error: error instanceof Error ? error.message : 'Unknown error'
           }
         });
@@ -697,24 +709,26 @@ export class OrderController {
       const orderCode = generateOrderCode(sequence.value);
 
       // Tạo order với default values cho các field không bắt buộc
+      // ✅ Tất cả các field đã được clean (loại bỏ dấu '=' ở đầu)
       const order = await prisma.order.create({
         data: {
           orderNumber: sequence.value,
           orderCode,
-          userId,
+          userId: cleanedUserId,
           total: Number(finalTotal),
-          // Default values cho chatbot orders (có thể cập nhật sau)
-          address: address || 'Chưa có địa chỉ - Đơn từ chatbot',
-          phoneNumber: phoneNumber || 'Chưa có số điện thoại',
-          provinceCode: provinceCode || '',
-          provinceName: provinceName || '',
-          districtCode: districtCode || '',
-          districtName: districtName || '',
-          wardCode: wardCode || '',
-          wardName: wardName || '',
-          note: note || `Đơn từ chatbot${sessionId ? ` (session: ${sessionId})` : ''}${source ? ` - ${source}` : ''}`,
-          paymentStatus: paymentStatus || 'PENDING',
-          status: status || 'PENDING',
+          // ✅ Dùng các giá trị đã clean
+          address: inputAddressDetail || 'Chưa có địa chỉ - Đơn từ chatbot',
+          phoneNumber: inputPhoneNumber || 'Chưa có số điện thoại',
+          // ✅ Lưu lại mã / tên đã được chuẩn hóa từ API OAPI-VN
+          provinceCode: finalProvinceCode || '',
+          provinceName: finalProvinceName || '',
+          districtCode: finalDistrictCode || '',
+          districtName: finalDistrictName || '',
+          wardCode: finalWardCode || '',
+          wardName: finalWardName || '',
+          note: cleanValue(note) || `Đơn từ chatbot${cleanValue(sessionId) ? ` (session: ${cleanValue(sessionId)})` : ''}${cleanValue(source) ? ` - ${cleanValue(source)}` : ''}`,
+          paymentStatus: (cleanValue(paymentStatus) || 'PENDING') as PaymentStatus,
+          status: (cleanValue(status) || 'PENDING') as OrderStatus,
           items: {
             create: validItems.map((item: any) => {
               const { productId, comboId } = normalizeItemIds(item);
@@ -772,11 +786,10 @@ export class OrderController {
 
       // ✅ QUAN TRỌNG: Tự động xóa giỏ hàng sau khi tạo đơn thành công (backup solution nếu AI không gọi carts Clear)
       try {
-        const { CartService } = await import('../services/cart.service');
-        const cartService = new CartService();
-        await cartService.clearCart(userId);
+        const cartService = await import('../services/cart.service');
+        await cartService.default.clearCart(cleanedUserId);
         console.log('✅ Cart automatically cleared after order creation:', {
-          userId,
+          userId: cleanedUserId,
           orderCode: order.orderCode
         });
       } catch (clearError) {

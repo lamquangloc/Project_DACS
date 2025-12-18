@@ -23,6 +23,8 @@ interface N8nResponse {
 class N8nService {
   private webhookUrl: string;
   private apiKey?: string;
+  // ✅ Cache order info theo sessionId
+  private orderInfoCache: Map<string, any> = new Map();
 
   constructor() {
     // Sử dụng webhook URL mặc định nếu chưa được cấu hình
@@ -38,6 +40,35 @@ class N8nService {
     } else {
       console.log(`✅ Using configured N8N webhook URL: ${this.webhookUrl}`);
     }
+  }
+
+  /**
+   * Lưu order info vào cache
+   */
+  saveOrderInfo(sessionId: string, orderInfo: any) {
+    const existing = this.orderInfoCache.get(sessionId) || {};
+    this.orderInfoCache.set(sessionId, {
+      ...existing,
+      ...orderInfo,
+      lastUpdated: new Date().toISOString()
+    });
+    console.log('💾 Order info saved to cache:', { sessionId, orderInfo });
+  }
+
+  /**
+   * Lấy order info từ cache
+   */
+  getOrderInfo(sessionId: string) {
+    const orderInfo = this.orderInfoCache.get(sessionId) || {};
+    return orderInfo;
+  }
+
+  /**
+   * Xóa order info khỏi cache (sau khi tạo đơn thành công)
+   */
+  clearOrderInfo(sessionId: string) {
+    this.orderInfoCache.delete(sessionId);
+    console.log('🗑️ Order info cleared from cache:', { sessionId });
   }
 
   /**
@@ -59,10 +90,24 @@ class N8nService {
 
       // Format dữ liệu phù hợp với N8N workflow
       // N8N Chat Trigger Node expects specific format
-      const generatedSessionId = request.sessionId || `session_${request.userId}_${Date.now()}`;
+      let generatedSessionId = request.sessionId || `session_${request.userId}_${Date.now()}`;
       
       // ✅ Lấy token từ request (để AI có thể dùng cho tool "carts Save")
       const token = request.token || null;
+      
+      // ✅ QUAN TRỌNG: Clear cache orderInfo cũ khi user bắt đầu đặt hàng mới
+      const userInput = request.input?.trim() || '';
+      const isNewOrderRequest = /^(đặt hàng|đặt món|thanh toán|chốt đơn|checkout|order)$/i.test(userInput);
+      if (isNewOrderRequest) {
+        // Clear cache cũ nếu có (dùng sessionId hiện tại)
+        if (this.orderInfoCache.has(generatedSessionId)) {
+          this.orderInfoCache.delete(generatedSessionId);
+          console.log('🗑️ Cleared old order info cache for new order request:', { sessionId: generatedSessionId });
+        }
+        // Tạo sessionId mới cho order mới (để không dùng cache cũ)
+        generatedSessionId = `session_${request.userId}_${Date.now()}`;
+        console.log('🆕 Created new sessionId for new order:', { newSessionId: generatedSessionId });
+      }
       
       // Extract cart data từ context (nếu có)
       let cartData = request.context?.cart || null;
@@ -155,6 +200,301 @@ class N8nService {
         delete normalizedContext.cart;
       }
       
+      // ✅ Lấy order info từ cache (nếu có)
+      const cachedOrderInfo = this.getOrderInfo(generatedSessionId);
+      
+      // ✅ Khai báo các regex patterns dùng chung
+      const noteKeywordsBlacklist = /^(cay|không cay|ít cay|vừa cay|rất cay|không hành|ít hành|nhiều hành|không tỏi|ít tỏi|nhiều tỏi|nóng|ấm|lạnh|đá|không đá|ít đá|nhiều đá)$/i;
+      const noteKeywordsWhitelist = /^(cay|không cay|ít cay|vừa cay|rất cay|không hành|ít hành|nhiều hành|không tỏi|ít tỏi|nhiều tỏi|nóng|ấm|lạnh|đá|không đá|ít đá|nhiều đá|không|không có)$/i;
+      
+      // ✅ Extract order info từ input (phone, province, district, ward, address, note)
+      // Note: userInput đã được khai báo ở trên (dòng 99)
+      const extractedOrderInfo: any = {};
+      
+      // Extract phone number từ input
+      const inputPhoneMatch = userInput.match(/^(\d{10,11})$/);
+      if (inputPhoneMatch && inputPhoneMatch[1]) {
+        extractedOrderInfo.phoneNumber = inputPhoneMatch[1];
+      }
+      
+      // Extract province từ input
+      const provinceMatchInput = userInput.match(/(Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng|Cần Thơ|An Giang|Bà Rịa|Bắc Giang|Bắc Kạn|Bạc Liêu|Bắc Ninh|Bến Tre|Bình Định|Bình Dương|Bình Phước|Bình Thuận|Cà Mau|Cao Bằng|Đắk Lắk|Đắk Nông|Điện Biên|Đồng Nai|Đồng Tháp|Gia Lai|Hà Giang|Hà Nam|Hà Tĩnh|Hải Dương|Hải Phòng|Hậu Giang|Hòa Bình|Hưng Yên|Khánh Hòa|Kiên Giang|Kon Tum|Lai Châu|Lâm Đồng|Lạng Sơn|Lào Cai|Long An|Nam Định|Nghệ An|Ninh Bình|Ninh Thuận|Phú Thọ|Phú Yên|Quảng Bình|Quảng Nam|Quảng Ngãi|Quảng Ninh|Quảng Trị|Sóc Trăng|Sơn La|Tây Ninh|Thái Bình|Thái Nguyên|Thanh Hóa|Thừa Thiên Huế|Tiền Giang|Trà Vinh|Tuyên Quang|Vĩnh Long|Vĩnh Phúc|Yên Bái)/i);
+      if (provinceMatchInput && provinceMatchInput[1]) {
+        let provinceName = provinceMatchInput[1].trim();
+        // Normalize province name
+        if (provinceName.match(/^(Hồ Chí Minh|HCM|TPHCM|Sài Gòn)$/i)) {
+          provinceName = 'Thành phố Hồ Chí Minh';
+        } else if (provinceName.match(/^(Hà Nội|HN)$/i)) {
+          provinceName = 'Thành phố Hà Nội';
+        } else if (provinceName.match(/^(Đà Nẵng|DN)$/i)) {
+          provinceName = 'Thành phố Đà Nẵng';
+        }
+        extractedOrderInfo.provinceName = provinceName;
+        
+        // ✅ Gọi API để lấy provinceCode (async, nhưng không block)
+        (async () => {
+          try {
+            const { getProvinces } = await import('../utils/oapi-vn');
+            const provinces = await getProvinces();
+            const province = provinces.find(p => 
+              p.name.toLowerCase().includes(provinceName.toLowerCase()) ||
+              provinceName.toLowerCase().includes(p.name.toLowerCase())
+            );
+            if (province) {
+              // Lưu vào cache ngay sau khi tìm được
+              const currentInfo = this.getOrderInfo(generatedSessionId);
+              this.saveOrderInfo(generatedSessionId, {
+                ...currentInfo,
+                provinceName: province.name,
+                provinceCode: province.id
+              });
+              console.log('💾 Found and saved province code from input:', province.id, 'for name:', province.name);
+            }
+          } catch (error) {
+            console.error('❌ Error fetching province code from input:', error);
+          }
+        })();
+      }
+      
+      // Extract district từ input
+      const districtMatchInput = userInput.match(/(?:quận|huyện|district)?\s*(Thủ Đức|Quận\s*1|Quận\s*2|Quận\s*3|Quận\s*4|Quận\s*5|Quận\s*6|Quận\s*7|Quận\s*8|Quận\s*9|Quận\s*10|Quận\s*11|Quận\s*12|Bình Thạnh|Tân Bình|Tân Phú|Phú Nhuận|Gò Vấp|Bình Tân|Hóc Môn|Củ Chi|Nhà Bè|Cần Giờ)/i);
+      if (districtMatchInput && districtMatchInput[1]) {
+        let districtName = districtMatchInput[1].trim();
+        // Normalize district name
+        if (districtName.match(/^Thủ Đức$/i)) {
+          districtName = 'Thành phố Thủ Đức';
+        } else if (districtName.match(/^Quận\s*(\d+)$/i)) {
+          const num = districtName.match(/^Quận\s*(\d+)$/i)?.[1];
+          districtName = `Quận ${num}`;
+        }
+        extractedOrderInfo.districtName = districtName;
+        
+        // ✅ Gọi API để lấy districtCode (async, nhưng không block)
+        const provinceCodeForDistrict = cachedOrderInfo.provinceCode || extractedOrderInfo.provinceCode;
+        if (provinceCodeForDistrict) {
+          (async () => {
+            try {
+              const { getDistrictsByProvinceId } = await import('../utils/oapi-vn');
+              const districts = await getDistrictsByProvinceId(provinceCodeForDistrict);
+              const district = districts.find(d => 
+                d.name.toLowerCase().includes(districtName.toLowerCase()) ||
+                districtName.toLowerCase().includes(d.name.toLowerCase())
+              );
+              if (district) {
+                // Lưu vào cache ngay sau khi tìm được
+                const currentInfo = this.getOrderInfo(generatedSessionId);
+                this.saveOrderInfo(generatedSessionId, {
+                  ...currentInfo,
+                  districtName: district.name,
+                  districtCode: district.id
+                });
+                console.log('💾 Found and saved district code from input:', district.id, 'for name:', district.name);
+              }
+            } catch (error) {
+              console.error('❌ Error fetching district code from input:', error);
+            }
+          })();
+        }
+      }
+      
+      // Extract ward từ input
+      // ✅ CHỈ extract ward khi:
+      // 1. Có prefix "phường/xã" HOẶC
+      // 2. Đã có districtCode (đang trong flow nhập phường) VÀ không có wardCode (chưa nhập phường)
+      // 3. KHÔNG extract nếu đã có wardCode (đã nhập phường rồi) - lúc này có thể là address hoặc note
+      const hasDistrictCode = !!(cachedOrderInfo.districtCode || extractedOrderInfo.districtCode);
+      const hasWardCode = !!(cachedOrderInfo.wardCode || extractedOrderInfo.wardCode);
+      
+      // Chỉ extract ward nếu chưa có wardCode và (có prefix phường/xã HOẶC đã có districtCode)
+      const wardMatchInput = userInput.match(/(?:phường|xã|ward)[\s/]*([A-Za-zÀ-ỹ0-9\s]+)/i);
+      const shouldExtractWard = !hasWardCode && (wardMatchInput || (hasDistrictCode && !hasWardCode));
+      
+      // ✅ Nếu có prefix "phường/xã" thì extract từ match, nếu không có prefix nhưng đã có districtCode thì extract toàn bộ input
+      let wardName: string | null = null;
+      if (wardMatchInput && wardMatchInput[1]) {
+        wardName = wardMatchInput[1].trim();
+      } else if (shouldExtractWard && hasDistrictCode && !hasWardCode) {
+        // ✅ Nếu không có prefix nhưng đã có districtCode, extract toàn bộ input (ví dụ: "Long Trường")
+        wardName = userInput.trim();
+      }
+      
+      if (shouldExtractWard && wardName) {
+        // Loại bỏ prefix "phường/xã" nếu có
+        wardName = wardName.replace(/^[/\s]*(?:phường|xã|ward)[\s/]*/i, '').trim();
+        wardName = wardName.replace(/^[/\s]+/, '').trim(); // Loại bỏ dấu / ở đầu
+        // Normalize ward name (loại bỏ khoảng trắng thừa)
+        wardName = wardName.replace(/\s+/g, ' ').trim();
+        
+        // ✅ Kiểm tra xem có phải là tên phường hợp lệ không (không phải tỉnh/quận/note)
+        // Blacklist các tên tỉnh/quận và các từ thường dùng cho note
+        const provinceDistrictBlacklist = /^(Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng|Thủ Đức|Quận\s*\d+|Bình Thạnh|Tân Bình|Tân Phú|Phú Nhuận|Gò Vấp|Bình Tân|Hóc Môn|Củ Chi|Nhà Bè|Cần Giờ)$/i;
+        // Note: noteKeywordsBlacklist đã được khai báo ở trên
+        
+        // ✅ Blacklist các từ không phải tên phường (ví dụ: "nào nhé", "gì", "đâu", etc.)
+        const invalidWardKeywords = /^(nào|gì|đâu|được|không|có|ok|được|bạn|anh|chị|em|mình|cho|biết|muốn|giao|hàng|đến|phường|xã|ward)$/i;
+        
+        if (!provinceDistrictBlacklist.test(wardName) && 
+            !noteKeywordsBlacklist.test(wardName) && 
+            !invalidWardKeywords.test(wardName) &&
+            wardName.length >= 3 && 
+            wardName.length <= 30) {
+          extractedOrderInfo.wardName = wardName;
+          
+          // ✅ Gọi API để lấy wardCode (async, nhưng không block)
+          const districtCodeForWard = cachedOrderInfo.districtCode || extractedOrderInfo.districtCode;
+          if (districtCodeForWard) {
+            (async () => {
+              try {
+                const { getWardsByDistrictId } = await import('../utils/oapi-vn');
+                const wards = await getWardsByDistrictId(districtCodeForWard);
+                const ward = wards.find(w => 
+                  w.name.toLowerCase().includes(wardName!.toLowerCase()) ||
+                  wardName!.toLowerCase().includes(w.name.toLowerCase())
+                );
+                if (ward) {
+                  // Lưu vào cache ngay sau khi tìm được
+                  const currentInfo = this.getOrderInfo(generatedSessionId);
+                  this.saveOrderInfo(generatedSessionId, {
+                    ...currentInfo,
+                    wardName: ward.name,
+                    wardCode: ward.id
+                  });
+                  console.log('💾 Found and saved ward code from input:', ward.id, 'for name:', ward.name);
+                } else {
+                  console.warn('⚠️ Ward not found in API for:', wardName, 'in district:', districtCodeForWard);
+                }
+              } catch (error) {
+                console.error('❌ Error fetching ward code from input:', error);
+              }
+            })();
+          } else {
+            console.warn('⚠️ Cannot fetch ward code: districtCode is missing for ward:', wardName);
+          }
+        }
+      }
+      
+      // Extract note từ input (nếu user nhập ghi chú)
+      // ✅ QUAN TRỌNG: Extract note TRƯỚC address để tránh note bị extract vào address
+      // ✅ CHỈ extract note khi:
+      // 1. Có từ khóa "ghi chú" HOẶC
+      // 2. Đã có address (đã nhập địa chỉ rồi) - lúc này user đang nhập note
+      // 3. Input ngắn (<50 ký tự) và không phải ward/address
+      const hasAddressForNote = !!(cachedOrderInfo.address || extractedOrderInfo.address);
+      const noteKeywords = userInput.match(/(?:ghi chú|note|lưu ý|chú ý)[\s:]*([A-Za-zÀ-ỹ0-9\s,./-]+)/i);
+      // Note: noteKeywordsBlacklist và noteKeywordsWhitelist đã được khai báo ở trên
+      
+      let isNoteExtracted = false; // ✅ Flag để đánh dấu đã extract note
+      
+      // Extract note nếu có từ khóa "ghi chú"
+      if (noteKeywords && noteKeywords[1]) {
+        let note = noteKeywords[1].trim();
+        // Loại bỏ các pattern câu hỏi của AI
+        note = note.replace(/(?:cho đơn hàng không|gì cho đơn hàng|đơn hàng không)/gi, '').trim();
+        // ✅ Blacklist các tên địa danh
+        const locationBlacklistForNote = /^(Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng|Thủ Đức|Quận\s*\d+|Bình Thạnh|Tân Bình|Tân Phú|Phú Nhuận|Gò Vấp|Bình Tân|Hóc Môn|Củ Chi|Nhà Bè|Cần Giờ|Long Thạnh Mỹ|An Khánh|An Phú|Bình Chiểu|Bình Thọ|Bình Trưng Tây|Hiệp Bình Chánh|Hiệp Bình Phước|Hiệp Phú|Linh Chiểu|Linh Trung|Linh Xuân|Linh Tây)$/i;
+        if (note.length > 0 && note !== 'Không' && note !== 'Không có' && !locationBlacklistForNote.test(note)) {
+          extractedOrderInfo.note = note;
+          isNoteExtracted = true;
+          console.log('💾 Extracted note from input (with keyword):', note);
+        }
+      } 
+      // ✅ Extract note tự động nếu đã có address và input match với note keywords HOẶC input ngắn (< 20 ký tự)
+      else if (hasAddressForNote && 
+               userInput && 
+               !inputPhoneMatch && 
+               !provinceMatchInput && 
+               !districtMatchInput && 
+               !wardMatchInput &&
+               userInput.length < 50 && // Note thường ngắn hơn address
+               userInput.length > 0 &&
+               !userInput.match(/^(Bạn|Anh|Chị|Em|Mình|Không|Có|Ok|Được)/i) &&
+               !userInput.match(/(?:địa chỉ|address|tỉnh|thành phố|quận|huyện|phường|xã)/i)) {
+        // ✅ Khai báo các regex patterns trước khi sử dụng
+        const commandBlacklist = /^(xem giỏ hàng|đặt hàng|thêm món|xóa món|thanh toán|hủy đơn|hủy đơn hàng|xem đơn hàng|đơn hàng|giỏ hàng|menu|thực đơn|help|trợ giúp)$/i;
+        const locationBlacklistForNote = /^(Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng|Thủ Đức|Quận\s*\d+|Bình Thạnh|Tân Bình|Tân Phú|Phú Nhuận|Gò Vấp|Bình Tân|Hóc Môn|Củ Chi|Nhà Bè|Cần Giờ|Long Thạnh Mỹ|An Khánh|An Phú|Bình Chiểu|Bình Thọ|Bình Trưng Tây|Hiệp Bình Chánh|Hiệp Bình Phước|Hiệp Phú|Linh Chiểu|Linh Trung|Linh Xuân|Linh Tây)$/i;
+        
+        // ✅ Nếu input ngắn (< 20 ký tự) và đã có address → ưu tiên extract note hơn address
+        // ✅ Hoặc nếu match với note keywords whitelist
+        
+        // ✅ Nếu input ngắn (< 20 ký tự) và không phải location/command → ưu tiên note
+        if (userInput.length < 20 && 
+            !locationBlacklistForNote.test(userInput.trim()) &&
+            !commandBlacklist.test(userInput.trim()) &&
+            !userInput.match(/^\d+$/)) { // Không phải chỉ có số (có thể là số nhà)
+          let cleanNote = userInput
+            .replace(/\n+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/(?:Bạn có muốn thêm ghi chú gì cho đơn hàng không|Có muốn thêm ghi chú|Ghi chú gì cho đơn hàng)/gi, '')
+            .trim();
+          if (cleanNote.length > 0 && cleanNote.length < 100) {
+            extractedOrderInfo.note = cleanNote;
+            isNoteExtracted = true;
+            console.log('💾 Extracted note from input (auto, short input after address):', cleanNote);
+          }
+        }
+        // ✅ Hoặc nếu match với note keywords whitelist
+        else if (noteKeywordsWhitelist.test(userInput.trim())) {
+          let cleanNote = userInput
+            .replace(/\n+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/(?:Bạn có muốn thêm ghi chú gì cho đơn hàng không|Có muốn thêm ghi chú|Ghi chú gì cho đơn hàng)/gi, '')
+            .trim();
+          if (cleanNote.length > 0 && cleanNote.length < 100) {
+            extractedOrderInfo.note = cleanNote;
+            isNoteExtracted = true;
+            console.log('💾 Extracted note from input (auto, after address):', cleanNote);
+          }
+        }
+      }
+      
+      // Extract address từ input
+      // ✅ CHỈ extract address khi:
+      // 1. Đã có wardCode (đã nhập phường rồi) - lúc này user đang nhập địa chỉ chi tiết
+      // 2. KHÔNG extract nếu đã extract note (để tránh note bị extract vào address)
+      // 3. Không phải số điện thoại, province, district, ward, note
+      const hasWardCodeForAddress = !!(cachedOrderInfo.wardCode || extractedOrderInfo.wardCode);
+      const commandBlacklist = /^(xem giỏ hàng|đặt hàng|thêm món|xóa món|thanh toán|hủy đơn|hủy đơn hàng|xem đơn hàng|đơn hàng|giỏ hàng|menu|thực đơn|help|trợ giúp)$/i;
+      const locationBlacklist = /^(Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng|Thủ Đức|Quận\s*\d+|Bình Thạnh|Tân Bình|Tân Phú|Phú Nhuận|Gò Vấp|Bình Tân|Hóc Môn|Củ Chi|Nhà Bè|Cần Giờ|Long Thạnh Mỹ|An Khánh|An Phú|Bình Chiểu|Bình Thọ|Bình Trưng Tây|Hiệp Bình Chánh|Hiệp Bình Phước|Hiệp Phú|Linh Chiểu|Linh Trung|Linh Xuân|Linh Tây)$/i;
+      // Note: noteKeywordsBlacklist đã được khai báo ở trên
+      
+      // ✅ CHỈ extract address khi đã có wardCode (đã nhập phường rồi) VÀ chưa extract note
+      // Address có thể ngắn (ví dụ: "1", "123", "10A"), không nên yêu cầu > 10 ký tự
+      // Nhưng cần phân biệt với note: note thường là từ khóa ngắn (cay, không cay, etc.), address là số nhà/đường
+      if (userInput && 
+          hasWardCodeForAddress && // ✅ CHỈ extract address khi đã có wardCode
+          !isNoteExtracted && // ✅ KHÔNG extract address nếu đã extract note
+          !inputPhoneMatch && 
+          !provinceMatchInput && 
+          !districtMatchInput && 
+          !wardMatchInput &&
+          !userInput.match(/^(Bạn|Anh|Chị|Em|Mình|Không|Có|Ok|Được)/i) &&
+          !userInput.match(/(?:có muốn|ghi chú|đơn hàng|thêm)/i) &&
+          !commandBlacklist.test(userInput.trim()) &&
+          !locationBlacklist.test(userInput.trim()) &&
+          !noteKeywordsBlacklist.test(userInput.trim()) && // ✅ Không phải note keywords
+          !noteKeywordsWhitelist.test(userInput.trim())) { // ✅ Không phải note keywords (whitelist)
+        // ✅ Address có thể là:
+        // - Số nhà (ví dụ: "1", "123", "10A")
+        // - Địa chỉ chi tiết (ví dụ: "123 Nguyễn Văn A")
+        // - Không phải note keywords (cay, không cay, etc.)
+        let cleanAddress = userInput
+          .replace(/\n+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .replace(/(?:Bạn có muốn thêm ghi chú gì cho đơn hàng không|Có muốn thêm ghi chú|Ghi chú gì cho đơn hàng)/gi, '')
+          .trim();
+        // ✅ Address phải có ít nhất 1 ký tự (có thể là "1", "123", etc.)
+        if (cleanAddress.length > 0) {
+          extractedOrderInfo.address = cleanAddress;
+          console.log('💾 Extracted address from input:', cleanAddress);
+        }
+      }
+      
+      // Merge cached order info với extracted info từ input
+      const orderInfo = {
+        ...cachedOrderInfo,
+        ...extractedOrderInfo
+      };
+      
       const payload = {
         // Chat Trigger Node sẽ nhận các field này từ Webhook body
         message: request.input,
@@ -190,6 +530,8 @@ class N8nService {
         'chat-session-id': generatedSessionId,
         // ✅ Gửi token để tool có thể dùng
         token: token || null, // Token để authenticate với backend API
+        // ✅ Gửi order info đã lưu (từ cache hoặc extracted từ input)
+        orderInfo: Object.keys(orderInfo).length > 0 ? orderInfo : undefined,
       };
       
       // ✅ QUAN TRỌNG: Loại bỏ các field undefined trong payload để tránh lỗi trong n8n
@@ -515,32 +857,40 @@ class N8nService {
       // ⚠️ QUAN TRỌNG: Clean reply để loại bỏ debug info từ N8N (ví dụ: "[Used tools: Tool: carts_Add, Input: {}, Result: [...]]")
       // Pattern: [Used tools: ...] ở đầu reply, sau đó là text thực tế
       if (reply && typeof reply === 'string') {
-        // Tìm pattern: [Used tools: ...] và loại bỏ nó (kết thúc bằng ] hoặc ]])
-        // Pattern phải match từ đầu reply đến khi gặp dấu đóng "]" hoặc "]]"
+        const beforeClean = reply;
+        
+        // Pattern 1: [Used tools: ...] ở đầu reply (kết thúc bằng ] hoặc ]])
         const usedToolsPattern = /^\[Used tools:[\s\S]*?\]\s*/;
         if (usedToolsPattern.test(reply)) {
-          const beforeClean = reply;
           reply = reply.replace(usedToolsPattern, '').trim();
-          console.log('✅ Cleaned "[Used tools: ...]]" debug info from reply:', {
+        }
+        
+        // Pattern 2: [Used tools: ...] ở bất kỳ đâu trong reply
+        const usedToolsPattern2 = /\[Used tools:[\s\S]*?\]\s*/;
+        if (usedToolsPattern2.test(reply)) {
+          reply = reply.replace(usedToolsPattern2, '').trim();
+        }
+        
+        // Pattern 3: Loại bỏ các JSON fragment như ,"total":0}}]] hoặc }}}] ở đầu reply
+        const jsonFragmentPattern = /^[,:}\]]+\s*/;
+        if (jsonFragmentPattern.test(reply)) {
+          reply = reply.replace(jsonFragmentPattern, '').trim();
+        }
+        
+        // Pattern 4: Loại bỏ các JSON fragment như ,"total":0}}]] hoặc }}}] ở bất kỳ đâu trong reply (nếu còn sót)
+        const jsonFragmentPattern2 = /[,:}\]]+\s*/g;
+        if (jsonFragmentPattern2.test(reply)) {
+          // Chỉ loại bỏ nếu nó ở đầu hoặc cuối reply, không loại bỏ ở giữa
+          reply = reply.replace(/^[,:}\]]+\s*/, '').replace(/\s*[,:}\]]+$/, '').trim();
+        }
+        
+        if (beforeClean !== reply) {
+          console.log('✅ Cleaned debug info from reply:', {
             beforeLength: beforeClean.length,
             afterLength: reply.length,
             beforePreview: beforeClean.substring(0, 150),
             afterPreview: reply.substring(0, 100)
           });
-        } else {
-          // Thử pattern khác: có thể không bắt đầu bằng [Used tools
-          // Tìm pattern: [Used tools: ...] ở bất kỳ đâu trong reply
-          const usedToolsPattern2 = /\[Used tools:[\s\S]*?\]\s*/;
-          if (usedToolsPattern2.test(reply)) {
-            const beforeClean = reply;
-            reply = reply.replace(usedToolsPattern2, '').trim();
-            console.log('✅ Cleaned "[Used tools: ...]]" debug info from reply (pattern 2):', {
-              beforeLength: beforeClean.length,
-              afterLength: reply.length,
-              beforePreview: beforeClean.substring(0, 150),
-              afterPreview: reply.substring(0, 100)
-            });
-          }
         }
       }
       
@@ -1176,10 +1526,14 @@ class N8nService {
         }
       }
 
-      // ⚠️ Nếu không có order data nhưng reply chứa "Mã đơn: ORD-..."
+      // ⚠️ Nếu không có order data nhưng reply chứa "Mã đơn: ORD-..." hoặc "ORD-..."
       // → tự lấy đơn hàng + QR code từ database để frontend hiển thị QR
       if (!responseOrderData && finalReply) {
-        const orderCodeMatch = finalReply.match(/Mã đơn:\s*(ORD-[0-9-]+)/);
+        // Thử nhiều pattern để extract orderCode
+        const orderCodeMatch = finalReply.match(/(?:Mã đơn|Mã đơn hàng|orderCode|order code)[:\s]*(ORD-[0-9-]+)/i) ||
+                              finalReply.match(/(ORD-\d{8}-\d{4})/i) ||
+                              finalReply.match(/(ORD-\d{6})/i) ||
+                              finalReply.match(/(ORD-[0-9-]+)/i);
         const orderCode = orderCodeMatch?.[1];
 
         if (orderCode) {
@@ -1259,11 +1613,435 @@ class N8nService {
         }
       }
       
+      // ✅ Extract order info từ response và lưu vào cache
+      // Nếu AI đã lưu order info (phoneNumber, address, etc.) trong response, lưu vào cache
+      const responseOrderInfo = data.orderInfo || data.context?.orderInfo || null;
+      if (responseOrderInfo) {
+        const currentOrderInfo = this.getOrderInfo(generatedSessionId);
+        this.saveOrderInfo(generatedSessionId, {
+          ...currentOrderInfo,
+          ...responseOrderInfo
+        });
+        console.log('💾 Saved order info from response:', responseOrderInfo);
+      }
+      
+      // ✅ Extract order info từ reply và userInput
+      const currentOrderInfo = this.getOrderInfo(generatedSessionId);
+      const extractedFromReply: any = {};
+      
+      // Lấy userInput từ request để extract
+      const userInputFromRequest = request.input || '';
+      
+      // Extract phone number từ reply hoặc userInput
+      const phoneMatch = finalReply.match(/(?:đã lưu|số điện thoại|SĐT|phone|nhận số).*?(\d{10,11})/i) ||
+                        userInputFromRequest.match(/^(\d{10,11})$/);
+      if (phoneMatch && phoneMatch[1]) {
+        extractedFromReply.phoneNumber = phoneMatch[1];
+        console.log('💾 Extracted phone number:', phoneMatch[1]);
+      }
+      
+      // Extract province từ reply hoặc userInput
+      let provinceName = '';
+      
+      // Thử extract từ reply trước
+      const provinceMatchReply = finalReply.match(/(?:tỉnh|thành phố|province|ở|giao hàng).*?(Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng|Cần Thơ|An Giang|Bà Rịa|Bắc Giang|Bắc Kạn|Bạc Liêu|Bắc Ninh|Bến Tre|Bình Định|Bình Dương|Bình Phước|Bình Thuận|Cà Mau|Cao Bằng|Đắk Lắk|Đắk Nông|Điện Biên|Đồng Nai|Đồng Tháp|Gia Lai|Hà Giang|Hà Nam|Hà Tĩnh|Hải Dương|Hải Phòng|Hậu Giang|Hòa Bình|Hưng Yên|Khánh Hòa|Kiên Giang|Kon Tum|Lai Châu|Lâm Đồng|Lạng Sơn|Lào Cai|Long An|Nam Định|Nghệ An|Ninh Bình|Ninh Thuận|Phú Thọ|Phú Yên|Quảng Bình|Quảng Nam|Quảng Ngãi|Quảng Ninh|Quảng Trị|Sóc Trăng|Sơn La|Tây Ninh|Thái Bình|Thái Nguyên|Thanh Hóa|Thừa Thiên Huế|Tiền Giang|Trà Vinh|Tuyên Quang|Vĩnh Long|Vĩnh Phúc|Yên Bái)/i);
+      if (provinceMatchReply && provinceMatchReply[1]) {
+        provinceName = provinceMatchReply[1].trim();
+      }
+      
+      // Nếu không có trong reply, thử extract từ userInput
+      if (!provinceName && userInputFromRequest) {
+        const provinceMatchInput = userInputFromRequest.match(/(Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng|Cần Thơ|An Giang|Bà Rịa|Bắc Giang|Bắc Kạn|Bạc Liêu|Bắc Ninh|Bến Tre|Bình Định|Bình Dương|Bình Phước|Bình Thuận|Cà Mau|Cao Bằng|Đắk Lắk|Đắk Nông|Điện Biên|Đồng Nai|Đồng Tháp|Gia Lai|Hà Giang|Hà Nam|Hà Tĩnh|Hải Dương|Hải Phòng|Hậu Giang|Hòa Bình|Hưng Yên|Khánh Hòa|Kiên Giang|Kon Tum|Lai Châu|Lâm Đồng|Lạng Sơn|Lào Cai|Long An|Nam Định|Nghệ An|Ninh Bình|Ninh Thuận|Phú Thọ|Phú Yên|Quảng Bình|Quảng Nam|Quảng Ngãi|Quảng Ninh|Quảng Trị|Sóc Trăng|Sơn La|Tây Ninh|Thái Bình|Thái Nguyên|Thanh Hóa|Thừa Thiên Huế|Tiền Giang|Trà Vinh|Tuyên Quang|Vĩnh Long|Vĩnh Phúc|Yên Bái)/i);
+        if (provinceMatchInput && provinceMatchInput[1]) {
+          provinceName = provinceMatchInput[1].trim();
+        }
+      }
+      
+      if (provinceName) {
+        // Normalize province name
+        let normalizedProvince = provinceName;
+        if (provinceName.match(/^(Hồ Chí Minh|HCM|TPHCM|Sài Gòn)$/i)) {
+          normalizedProvince = 'Thành phố Hồ Chí Minh';
+        } else if (provinceName.match(/^(Hà Nội|HN)$/i)) {
+          normalizedProvince = 'Thành phố Hà Nội';
+        } else if (provinceName.match(/^(Đà Nẵng|DN)$/i)) {
+          normalizedProvince = 'Thành phố Đà Nẵng';
+        }
+        extractedFromReply.provinceName = normalizedProvince;
+        console.log('💾 Extracted province name:', normalizedProvince);
+        
+        // ✅ Gọi API để lấy provinceCode từ provinceName
+        try {
+          const { getProvinces } = await import('../utils/oapi-vn');
+          const provinces = await getProvinces();
+          const province = provinces.find(p => 
+            p.name.toLowerCase().includes(normalizedProvince.toLowerCase()) ||
+            normalizedProvince.toLowerCase().includes(p.name.toLowerCase())
+          );
+          if (province) {
+            extractedFromReply.provinceCode = province.id;
+            extractedFromReply.provinceName = province.name; // Dùng tên chính xác từ API
+            console.log('💾 Found province code:', province.id, 'for name:', province.name);
+          } else {
+            console.warn('⚠️ Province not found in API for:', normalizedProvince);
+          }
+        } catch (error) {
+          console.error('❌ Error fetching province code:', error);
+        }
+      }
+      
+      // Extract district (Quận/Huyện)
+      // Pattern: "quận/huyện" + tên quận, hoặc chỉ tên quận
+      const districtMatch = finalReply.match(/(?:quận|huyện|district)[\s/]*([A-Za-zÀ-ỹ0-9\s]+)/i) ||
+                           finalReply.match(/(Thủ Đức|Quận\s*1|Quận\s*2|Quận\s*3|Quận\s*4|Quận\s*5|Quận\s*6|Quận\s*7|Quận\s*8|Quận\s*9|Quận\s*10|Quận\s*11|Quận\s*12|Bình Thạnh|Tân Bình|Tân Phú|Phú Nhuận|Gò Vấp|Bình Tân|Hóc Môn|Củ Chi|Nhà Bè|Cần Giờ)/i);
+      if (districtMatch && districtMatch[1]) {
+        let districtName = districtMatch[1].trim();
+        // Loại bỏ dấu / ở đầu và các từ không cần thiết
+        districtName = districtName.replace(/^[/\s]*(?:quận|huyện|district)[\s/]*/i, '').trim();
+        districtName = districtName.replace(/^[/\s]+/, '').trim(); // Loại bỏ dấu / ở đầu
+        
+        if (districtName) {
+          // Normalize district name
+          let normalizedDistrict = districtName;
+          if (districtName.match(/^Thủ Đức$/i)) {
+            normalizedDistrict = 'Thành phố Thủ Đức';
+          } else if (districtName.match(/^Quận\s*(\d+)$/i)) {
+            const num = districtName.match(/^Quận\s*(\d+)$/i)?.[1];
+            normalizedDistrict = `Quận ${num}`;
+          }
+          extractedFromReply.districtName = normalizedDistrict;
+          console.log('💾 Extracted district from reply:', normalizedDistrict);
+          
+          // ✅ Gọi API để lấy districtCode từ districtName (cần provinceCode trước)
+          const currentProvinceCode = currentOrderInfo.provinceCode || extractedFromReply.provinceCode;
+          if (currentProvinceCode) {
+            try {
+              const { getDistrictsByProvinceId } = await import('../utils/oapi-vn');
+              const districts = await getDistrictsByProvinceId(currentProvinceCode);
+              const district = districts.find(d => 
+                d.name.toLowerCase().includes(normalizedDistrict.toLowerCase()) ||
+                normalizedDistrict.toLowerCase().includes(d.name.toLowerCase())
+              );
+              if (district) {
+                extractedFromReply.districtCode = district.id;
+                extractedFromReply.districtName = district.name; // Dùng tên chính xác từ API
+                console.log('💾 Found district code:', district.id, 'for name:', district.name);
+              } else {
+                console.warn('⚠️ District not found in API for:', normalizedDistrict);
+              }
+            } catch (error) {
+              console.error('❌ Error fetching district code:', error);
+            }
+          } else {
+            console.warn('⚠️ Cannot fetch district code: provinceCode is missing');
+          }
+        }
+      }
+      
+      // Extract ward (Phường/Xã) - CHỈ extract từ reply nếu có prefix "phường/xã"
+      // ✅ KHÔNG extract ward từ reply nếu đã có wardCode (đã nhập phường rồi) - lúc này có thể là address hoặc note
+      // ✅ QUAN TRỌNG: KHÔNG extract ward từ reply nếu reply chứa câu hỏi (ví dụ: "phường/xã nào nhé")
+      const hasWardCodeFromReply = !!(currentOrderInfo.wardCode || extractedFromReply.wardCode);
+      const wardMatch = finalReply.match(/(?:phường|xã|ward)[\s/]*([A-Za-zÀ-ỹ0-9\s]+)/i);
+      
+      // ✅ Kiểm tra xem reply có phải là câu hỏi không (ví dụ: "phường/xã nào nhé")
+      const isQuestionPattern = /(?:nào|gì|đâu|được|không|có|ok|được|bạn|anh|chị|em|mình|cho|biết|muốn|giao|hàng|đến)[\s]*$/i;
+      
+      // CHỈ extract ward nếu chưa có wardCode và có prefix "phường/xã" VÀ không phải câu hỏi
+      if (!hasWardCodeFromReply && wardMatch && wardMatch[1]) {
+        let wardName = wardMatch[1].trim();
+        // Loại bỏ dấu / ở đầu và các từ không cần thiết
+        wardName = wardName.replace(/^[/\s]*(?:phường|xã|ward)[\s/]*/i, '').trim();
+        wardName = wardName.replace(/^[/\s]+/, '').trim(); // Loại bỏ dấu / ở đầu
+        wardName = wardName.replace(/\s+/g, ' ').trim(); // Normalize khoảng trắng
+        
+        // ✅ Kiểm tra xem có phải là tên phường hợp lệ không (không phải tỉnh/quận/note)
+        const provinceDistrictBlacklist = /^(Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng|Thủ Đức|Quận\s*\d+|Bình Thạnh|Tân Bình|Tân Phú|Phú Nhuận|Gò Vấp|Bình Tân|Hóc Môn|Củ Chi|Nhà Bè|Cần Giờ)$/i;
+        // Note: noteKeywordsBlacklist đã được khai báo ở trên (trong function sendMessage)
+        
+        // ✅ Blacklist các từ không phải tên phường (ví dụ: "nào nhé", "gì", "đâu", etc.)
+        const invalidWardKeywords = /^(nào|gì|đâu|được|không|có|ok|được|bạn|anh|chị|em|mình|cho|biết|muốn|giao|hàng|đến)$/i;
+        
+        // ✅ Kiểm tra xem wardName có kết thúc bằng các từ câu hỏi không (ví dụ: "nào nhé")
+        const endsWithQuestion = isQuestionPattern.test(wardName);
+        
+        if (wardName && 
+            !endsWithQuestion && // ✅ KHÔNG extract nếu kết thúc bằng câu hỏi
+            wardName.length >= 3 && 
+            wardName.length <= 30 &&
+            !provinceDistrictBlacklist.test(wardName) &&
+            !noteKeywordsBlacklist.test(wardName) &&
+            !invalidWardKeywords.test(wardName)) {
+          extractedFromReply.wardName = wardName;
+          console.log('💾 Extracted ward from reply:', wardName);
+          
+          // ✅ Gọi API để lấy wardCode từ wardName (cần districtCode trước)
+          const currentDistrictCode = currentOrderInfo.districtCode || extractedFromReply.districtCode;
+          if (currentDistrictCode) {
+            try {
+              const { getWardsByDistrictId } = await import('../utils/oapi-vn');
+              const wards = await getWardsByDistrictId(currentDistrictCode);
+              const ward = wards.find(w => 
+                w.name.toLowerCase().includes(wardName.toLowerCase()) ||
+                wardName.toLowerCase().includes(w.name.toLowerCase())
+              );
+              if (ward) {
+                extractedFromReply.wardCode = ward.id;
+                extractedFromReply.wardName = ward.name; // Dùng tên chính xác từ API
+                console.log('💾 Found ward code:', ward.id, 'for name:', ward.name);
+              } else {
+                console.warn('⚠️ Ward not found in API for:', wardName, 'in district:', currentDistrictCode);
+              }
+            } catch (error) {
+              console.error('❌ Error fetching ward code:', error);
+            }
+          } else {
+            console.warn('⚠️ Cannot fetch ward code: districtCode is missing for ward:', wardName);
+          }
+        }
+      }
+      
+      // Extract note (ghi chú) - CHỈ extract từ userInput, KHÔNG extract từ finalReply
+      // ✅ QUAN TRỌNG: Extract note TRƯỚC address để tránh note bị extract vào address
+      // ✅ CHỈ extract note khi:
+      // 1. Có từ khóa "ghi chú" HOẶC
+      // 2. Đã có address (đã nhập địa chỉ rồi) - lúc này user đang nhập note
+      // 3. Input ngắn (<50 ký tự) và match với note keywords (cay, không cay, etc.)
+      const hasAddressForNoteFromReply = !!(currentOrderInfo.address || extractedFromReply.address);
+      const noteKeywordsFromReply = userInputFromRequest?.match(/(?:ghi chú|note|lưu ý|chú ý)[\s:]*([A-Za-zÀ-ỹ0-9\s,./-]+)/i);
+      // Note: noteKeywordsBlacklist và noteKeywordsWhitelist đã được khai báo ở trên (trong function sendMessage)
+      
+      let isNoteExtractedFromReply = false; // ✅ Flag để đánh dấu đã extract note
+      
+      // Extract note nếu có từ khóa "ghi chú"
+      if (noteKeywordsFromReply && noteKeywordsFromReply[1]) {
+        let note = noteKeywordsFromReply[1].trim();
+        // Loại bỏ các pattern câu hỏi của AI
+        note = note.replace(/(?:cho đơn hàng không|gì cho đơn hàng|đơn hàng không)/gi, '').trim();
+        // ✅ Blacklist các tên địa danh
+        const locationBlacklistForNote = /^(Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng|Thủ Đức|Quận\s*\d+|Bình Thạnh|Tân Bình|Tân Phú|Phú Nhuận|Gò Vấp|Bình Tân|Hóc Môn|Củ Chi|Nhà Bè|Cần Giờ|Long Thạnh Mỹ|An Khánh|An Phú|Bình Chiểu|Bình Thọ|Bình Trưng Tây|Hiệp Bình Chánh|Hiệp Bình Phước|Hiệp Phú|Linh Chiểu|Linh Trung|Linh Xuân|Linh Tây)$/i;
+        if (note.length > 0 && note !== 'Không' && note !== 'Không có' && !locationBlacklistForNote.test(note)) {
+          extractedFromReply.note = note;
+          isNoteExtractedFromReply = true;
+          console.log('💾 Extracted note from userInput (with keyword):', note);
+        }
+      }
+      // ✅ Extract note tự động nếu đã có address và input match với note keywords HOẶC input ngắn (< 20 ký tự)
+      else if (hasAddressForNoteFromReply && 
+               userInputFromRequest && 
+               userInputFromRequest.length < 50 && // Note thường ngắn hơn address
+               userInputFromRequest.length > 0 &&
+               !userInputFromRequest.match(/^(\d{10,11})$/i) && // Không phải số điện thoại
+               !userInputFromRequest.match(/(?:địa chỉ|address|tỉnh|thành phố|quận|huyện|phường|xã)/i)) {
+        const commandBlacklistFromReply = /^(xem giỏ hàng|đặt hàng|thêm món|xóa món|thanh toán|hủy đơn|hủy đơn hàng|xem đơn hàng|đơn hàng|giỏ hàng|menu|thực đơn|help|trợ giúp)$/i;
+        const locationBlacklistForNote = /^(Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng|Thủ Đức|Quận\s*\d+|Bình Thạnh|Tân Bình|Tân Phú|Phú Nhuận|Gò Vấp|Bình Tân|Hóc Môn|Củ Chi|Nhà Bè|Cần Giờ|Long Thạnh Mỹ|An Khánh|An Phú|Bình Chiểu|Bình Thọ|Bình Trưng Tây|Hiệp Bình Chánh|Hiệp Bình Phước|Hiệp Phú|Linh Chiểu|Linh Trung|Linh Xuân|Linh Tây)$/i;
+        
+        // ✅ Nếu input ngắn (< 20 ký tự) và không phải location/command → ưu tiên note
+        if (userInputFromRequest.length < 20 && 
+            !locationBlacklistForNote.test(userInputFromRequest.trim()) &&
+            !commandBlacklistFromReply.test(userInputFromRequest.trim()) &&
+            !userInputFromRequest.match(/^\d+$/)) { // Không phải chỉ có số (có thể là số nhà)
+          let cleanNote = userInputFromRequest
+            .replace(/\n+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/(?:Bạn có muốn thêm ghi chú gì cho đơn hàng không|Có muốn thêm ghi chú|Ghi chú gì cho đơn hàng)/gi, '')
+            .trim();
+          if (cleanNote.length > 0 && cleanNote.length < 100) {
+            extractedFromReply.note = cleanNote;
+            isNoteExtractedFromReply = true;
+            console.log('💾 Extracted note from userInput (auto, short input after address):', cleanNote);
+          }
+        }
+        // ✅ Hoặc nếu match với note keywords whitelist
+        else if (noteKeywordsWhitelist.test(userInputFromRequest.trim())) {
+          let cleanNote = userInputFromRequest
+            .replace(/\n+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/(?:Bạn có muốn thêm ghi chú gì cho đơn hàng không|Có muốn thêm ghi chú|Ghi chú gì cho đơn hàng)/gi, '')
+            .trim();
+          if (cleanNote.length > 0 && cleanNote.length < 100) {
+            extractedFromReply.note = cleanNote;
+            isNoteExtractedFromReply = true;
+            console.log('💾 Extracted note from userInput (auto, after address):', cleanNote);
+          }
+        }
+      }
+      
+      // Extract address (địa chỉ) - CHỈ extract từ userInput, KHÔNG extract từ finalReply
+      // ✅ CHỈ extract address khi:
+      // 1. Đã có wardCode (đã nhập phường rồi) - lúc này user đang nhập địa chỉ chi tiết
+      // 2. KHÔNG extract nếu đã extract note (để tránh note bị extract vào address)
+      const hasWardCodeForAddressFromReply = !!(currentOrderInfo.wardCode || extractedFromReply.wardCode);
+      const commandBlacklistFromReply = /^(xem giỏ hàng|đặt hàng|thêm món|xóa món|thanh toán|hủy đơn|hủy đơn hàng|xem đơn hàng|đơn hàng|giỏ hàng|menu|thực đơn|help|trợ giúp)$/i;
+      const locationBlacklistForAddress = /^(Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng|Thủ Đức|Quận\s*\d+|Bình Thạnh|Tân Bình|Tân Phú|Phú Nhuận|Gò Vấp|Bình Tân|Hóc Môn|Củ Chi|Nhà Bè|Cần Giờ|Long Thạnh Mỹ|An Khánh|An Phú|Bình Chiểu|Bình Thọ|Bình Trưng Tây|Hiệp Bình Chánh|Hiệp Bình Phước|Hiệp Phú|Linh Chiểu|Linh Trung|Linh Xuân|Linh Tây)$/i;
+      // Note: noteKeywordsBlacklist và noteKeywordsWhitelist đã được khai báo ở trên (trong function sendMessage)
+      
+      // ✅ CHỈ extract address khi đã có wardCode (đã nhập phường rồi) VÀ chưa extract note
+      // Address có thể ngắn (ví dụ: "1", "123", "10A"), không nên yêu cầu > 10 ký tự
+      // Nhưng cần phân biệt với note: note thường là từ khóa ngắn (cay, không cay, etc.), address là số nhà/đường
+      if (userInputFromRequest && 
+          hasWardCodeForAddressFromReply && // ✅ CHỈ extract address khi đã có wardCode
+          !isNoteExtractedFromReply && // ✅ KHÔNG extract address nếu đã extract note
+          !userInputFromRequest.match(/^(\d{10,11})$/i) && // Không phải số điện thoại
+          !userInputFromRequest.match(/(?:Hồ Chí Minh|HCM|TPHCM|Sài Gòn|Hà Nội|Đà Nẵng)/i) && // Không phải province
+          !userInputFromRequest.match(/(?:Thủ Đức|Quận|Huyện)/i) && // Không phải district
+          !userInputFromRequest.match(/(?:Long Trường|Phường|Xã)/i) && // Không phải ward
+          !userInputFromRequest.match(/^(Bạn|Anh|Chị|Em|Mình|Không|Có|Ok|Được)/i) &&
+          !userInputFromRequest.match(/(?:có muốn|ghi chú|đơn hàng|thêm)/i) &&
+          !commandBlacklistFromReply.test(userInputFromRequest.trim()) &&
+          !locationBlacklistForAddress.test(userInputFromRequest.trim()) &&
+          !noteKeywordsBlacklist.test(userInputFromRequest.trim()) && // ✅ Không phải note keywords
+          !noteKeywordsWhitelist.test(userInputFromRequest.trim())) { // ✅ Không phải note keywords (whitelist)
+          // Note: noteKeywordsBlacklist và noteKeywordsWhitelist đã được khai báo ở trên (trong function sendMessage)
+        // Loại bỏ các pattern câu hỏi của AI
+        let cleanAddress = userInputFromRequest
+          .replace(/\n+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .replace(/(?:Bạn có muốn thêm ghi chú gì cho đơn hàng không|Có muốn thêm ghi chú|Ghi chú gì cho đơn hàng)/gi, '')
+          .trim();
+        // ✅ Address phải có ít nhất 1 ký tự (có thể là "1", "123", etc.)
+        if (cleanAddress.length > 0) {
+          extractedFromReply.address = cleanAddress;
+          console.log('💾 Extracted address from userInput:', cleanAddress);
+        }
+      }
+      
+      // Merge extracted order info với orderInfo hiện tại và lưu vào cache
+      if (Object.keys(extractedFromReply).length > 0) {
+        this.saveOrderInfo(generatedSessionId, {
+          ...currentOrderInfo,
+          ...extractedFromReply
+        });
+        console.log('💾 Merged and saved extracted order info:', extractedOrderInfo);
+      }
+      
+      // ✅ Tự động format order summary từ orderInfo và cart để gửi về frontend
+      // Frontend sẽ tự render từ formattedOrderSummary, không cần AI format
+      let formattedOrderSummary: string | null = null;
+      
+      // ✅ QUAN TRỌNG: Ưu tiên orderInfo từ request hiện tại (payload.orderInfo) thay vì cache
+      // Đảm bảo lấy đúng SĐT và thông tin từ request hiện tại, không dùng cache cũ
+      const requestOrderInfo = payload.orderInfo || {};
+      const cachedOrderInfoForFormat = this.getOrderInfo(generatedSessionId);
+      
+      // ✅ Merge: Ưu tiên request hiện tại, fallback về cache
+      const orderInfoForFormat = {
+        ...cachedOrderInfoForFormat,
+        ...requestOrderInfo // ✅ Ưu tiên request hiện tại (đảm bảo đúng SĐT)
+      };
+      
+      // ✅ QUAN TRỌNG: KHÔNG format sau khi đã tạo đơn (có order data trong response)
+      // Nếu đã có order data → Không format summary nữa (để tránh hiển thị 2 lần)
+      const hasOrderData = responseOrderData && responseOrderData.orderCode;
+      
+      // ✅ Format order summary nếu có đủ thông tin (cart + orderInfo với đủ 6 thông tin)
+      // Điều kiện: Có cart VÀ có đủ 6 thông tin (phoneNumber, provinceName, districtName, wardName, address, note)
+      // QUAN TRỌNG: Chỉ format khi user ĐÃ TRẢ LỜI về note (kể cả "Không" hoặc "Không có")
+      // VÀ CHƯA tạo đơn (không có order data)
+      const hasAllOrderInfo = !hasOrderData && // ✅ Chỉ format nếu chưa tạo đơn
+                              orderInfoForFormat && 
+                              orderInfoForFormat.phoneNumber && 
+                              orderInfoForFormat.provinceName && 
+                              orderInfoForFormat.districtName && 
+                              orderInfoForFormat.wardName && 
+                              orderInfoForFormat.address &&
+                              // ✅ QUAN TRỌNG: Chỉ format khi note đã được set (user đã trả lời về note)
+                              // Note có thể là rỗng nếu user nói "Không" hoặc "Không có", nhưng field `note` phải tồn tại
+                              (orderInfoForFormat.note !== undefined && orderInfoForFormat.note !== null);
+      
+      // ✅ Kiểm tra AI có đang hỏi về note KHÔNG (chỉ chặn nếu user CHƯA trả lời về note)
+      // Nếu user đã trả lời về note (có `note` trong cache) → KHÔNG chặn, format ngay
+      const isAskingForNote = !hasAllOrderInfo && finalReply && (
+        finalReply.toLowerCase().includes('ghi chú') ||
+        finalReply.toLowerCase().includes('note') ||
+        finalReply.toLowerCase().includes('bạn có ghi chú')
+      );
+      
+      // ✅ Chỉ format nếu có đủ thông tin VÀ KHÔNG đang hỏi về note (hoặc user đã trả lời về note)
+      // VÀ CHƯA tạo đơn (không có order data)
+      if (hasCartActual && cartData && cartData.items && cartData.items.length > 0 && hasAllOrderInfo && !isAskingForNote) {
+        try {
+          // Format items
+          const itemsText = cartData.items.map((item: any) => {
+            const name = item.name || '';
+            const price = item.price || 0;
+            const quantity = item.quantity || 1;
+            const formattedPrice = new Intl.NumberFormat('vi-VN').format(price);
+            return `- ${name} – ${formattedPrice}₫ x ${quantity}`;
+          }).join('\n');
+          
+          // Format total
+          const formattedTotal = new Intl.NumberFormat('vi-VN').format(cartData.total || 0);
+          
+          // Format address
+          let fullAddress = orderInfoForFormat.address || '';
+          if (orderInfoForFormat.wardName) {
+            fullAddress += (fullAddress ? ', ' : '') + orderInfoForFormat.wardName;
+          }
+          if (orderInfoForFormat.districtName) {
+            fullAddress += (fullAddress ? ', ' : '') + orderInfoForFormat.districtName;
+          }
+          if (orderInfoForFormat.provinceName) {
+            fullAddress += (fullAddress ? ', ' : '') + orderInfoForFormat.provinceName;
+          }
+          
+          // Format note
+          const note = orderInfoForFormat.note || '';
+          const noteText = note && note.trim() && note.toLowerCase() !== 'không' && note.toLowerCase() !== 'không có' 
+            ? note 
+            : 'Không có';
+          
+          // Tạo formattedOrderSummary
+          formattedOrderSummary = `**Giỏ hàng:**
+${itemsText}
+**Tổng cộng: ${formattedTotal}₫**
+
+**Thông tin liên hệ:**
+- Số điện thoại: ${orderInfoForFormat.phoneNumber || ''}
+- Địa chỉ: ${fullAddress}
+- Ghi chú: ${noteText}
+
+Bạn có muốn **xác nhận đặt hàng** không? (trả lời 'Có' hoặc 'Xác nhận')`;
+          
+          console.log('✅ Auto-formatted order summary from backend:', {
+            itemsCount: cartData.items.length,
+            firstItemName: cartData.items[0]?.name,
+            phoneNumber: orderInfoForFormat.phoneNumber, // ✅ SĐT từ request hiện tại
+            phoneNumberFromRequest: requestOrderInfo.phoneNumber,
+            phoneNumberFromCache: cachedOrderInfoForFormat.phoneNumber,
+            totalAmount: cartData.total,
+            formattedOrderSummaryLength: formattedOrderSummary.length,
+            formattedOrderSummaryPreview: formattedOrderSummary.substring(0, 150)
+          });
+        } catch (formatError) {
+          console.error('❌ Error formatting order summary in backend:', formatError);
+        }
+      }
+      
+      // ✅ Log để debug formattedOrderSummary
+      if (formattedOrderSummary) {
+        console.log('📤 Sending formattedOrderSummary to frontend:', {
+          hasFormattedOrderSummary: !!formattedOrderSummary,
+          formattedOrderSummaryLength: formattedOrderSummary.length,
+          formattedOrderSummaryPreview: formattedOrderSummary.substring(0, 200)
+        });
+      } else {
+        console.log('⚠️ No formattedOrderSummary to send (conditions not met):', {
+          hasCartActual,
+          hasCartData: !!cartData,
+          hasItems: cartData?.items?.length > 0,
+          hasAllOrderInfo: !!hasAllOrderInfo,
+          isAskingForNote,
+          cachedOrderInfoKeys: cachedOrderInfoForFormat ? Object.keys(cachedOrderInfoForFormat) : []
+        });
+      }
+      
       return {
         reply: finalReply, // Đảm bảo là string và KHÔNG rỗng
         context: data.context || data.metadata || null,
         cart: responseCartData, // Forward cart data về frontend để sync
         order: responseOrderData, // ✅ Forward order data về frontend để hiển thị QR code
+        formattedOrderSummary: formattedOrderSummary || null, // ✅ Auto-formatted order summary từ backend (null nếu không có)
         sessionId: data.sessionId || payload.sessionId,
         metadata: data.metadata || payload.metadata,
       };

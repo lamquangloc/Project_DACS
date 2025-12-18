@@ -172,6 +172,7 @@ router.post('/chat', async (req, res) => {
       context: response.context || null,
       cart: response.cart || null, // Forward cart data để frontend sync
       order: response.order || null, // ✅ Forward order data để frontend hiển thị QR code
+      formattedOrderSummary: response.formattedOrderSummary || null, // ✅ Auto-formatted order summary từ backend (ưu tiên hiển thị này thay vì reply từ AI)
       sessionId: response.sessionId || sessionId,
       metadata: response.metadata || null
     };
@@ -183,6 +184,8 @@ router.post('/chat', async (req, res) => {
       cartItemsCount: formattedResponse.cart?.items?.length || 0,
       hasOrder: !!formattedResponse.order, // ✅ Log order data
       hasQrCode: !!formattedResponse.order?.qrCode?.qrCodeUrl, // ✅ Log QR code
+      hasFormattedOrderSummary: !!formattedResponse.formattedOrderSummary, // ✅ Log formattedOrderSummary
+      formattedOrderSummaryLength: formattedResponse.formattedOrderSummary?.length || 0,
       replyType: typeof formattedResponse.reply,
       replyIsEmpty: !formattedResponse.reply || formattedResponse.reply.trim() === ''
     });

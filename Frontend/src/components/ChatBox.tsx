@@ -3285,30 +3285,83 @@ const ChatBox: React.FC = () => {
       }
 
       // ⚠️ CỰC KỲ QUAN TRỌNG: Đảm bảo reply KHÔNG rỗng
+      // ✅ ƯU TIÊN: Sử dụng formattedOrderSummary từ backend nếu có (tự động format từ orderInfo + cart)
+      // Nếu có formattedOrderSummary → Kết hợp message ngắn gọn từ AI + formattedOrderSummary
       let reply = data.reply || 'Xin lỗi, tôi không thể trả lời ngay bây giờ.';
       
-      // ✅ Loại bỏ các dòng sản phẩm bị lặp lại (ví dụ: cùng món xuất hiện cả dạng bullet và text)
-      reply = removeDuplicateProductLines(reply);
-      
-      // ✅ Loại bỏ JSON data khỏi reply text (nếu có) - để tránh hiển thị JSON trong chat
-      // Pattern: tìm và loại bỏ các block JSON như { "id": "...", "orderCode": "...", ... }
-      reply = reply.replace(/\{[\s\S]*?"orderCode"[\s\S]*?\}/g, '').trim();
-      reply = reply.replace(/\{[\s\S]*?"id"[\s\S]*?"orderCode"[\s\S]*?\}/g, '').trim();
-      // Loại bỏ các dòng có chứa JSON structure
-      const lines = reply.split('\n');
-      const cleanedLines = lines.filter(line => {
-        const trimmed = line.trim();
-        // Loại bỏ dòng có chứa JSON structure (có nhiều dấu ngoặc nhọn, dấu phẩy, dấu hai chấm)
-        if (trimmed.startsWith('{') && trimmed.includes('"') && trimmed.includes(':')) {
-          return false;
+      // ✅ Nếu có formattedOrderSummary từ backend → SỬ DỤNG HOÀN TOÀN, KHÔNG DÙNG REPLY TỪ AI
+      if (data.formattedOrderSummary) {
+        console.log('✅ Using formattedOrderSummary from backend (PRIORITY):', {
+          hasFormattedOrderSummary: !!data.formattedOrderSummary,
+          formattedOrderSummaryLength: data.formattedOrderSummary.length,
+          aiReplyLength: reply.length,
+          aiReplyPreview: reply.substring(0, 100)
+        });
+        
+        // ✅ ƯU TIÊN HOÀN TOÀN: Chỉ dùng formattedOrderSummary từ backend
+        // Loại bỏ toàn bộ reply từ AI và chỉ dùng formattedOrderSummary
+        // Chỉ giữ lại message ngắn gọn từ AI (nếu có) như "Cảm ơn bạn, Tũn đã ghi nhận..."
+        // Loại bỏ toàn bộ phần tóm tắt đơn hàng từ AI reply
+        const orderSummaryPatterns = [
+          /\*\*Giỏ hàng:[\s\S]*?\*\*Tổng cộng:[\s\S]*?₫\*\*/g,
+          /\*\*Thông tin liên hệ:[\s\S]*?Ghi chú:[\s\S]*?\n/g,
+          /Bạn có muốn.*?xác nhận đặt hàng.*?\?/g,
+          /- .*? – .*?₫ x \d+/g, // Loại bỏ các dòng món ăn
+          /\*\*Tổng cộng:.*?₫\*\*/g
+        ];
+        
+        let cleanedReply = reply;
+        orderSummaryPatterns.forEach(pattern => {
+          cleanedReply = cleanedReply.replace(pattern, '').trim();
+        });
+        
+        // Loại bỏ các dòng trống thừa
+        cleanedReply = cleanedReply.replace(/\n{3,}/g, '\n\n').trim();
+        
+        // ✅ Chỉ giữ lại message ngắn gọn từ AI (nếu có) như "Cảm ơn bạn, Tũn đã ghi nhận..."
+        // Nếu cleanedReply không chứa tóm tắt đơn hàng và có nội dung → Kết hợp với formattedOrderSummary
+        // Nếu cleanedReply rỗng hoặc chứa tóm tắt đơn hàng → Chỉ dùng formattedOrderSummary
+        if (cleanedReply && 
+            cleanedReply.trim().length > 0 && 
+            cleanedReply.trim().length < 100 && // Message ngắn gọn
+            !cleanedReply.match(/giỏ hàng|thông tin liên hệ|tổng cộng|số điện thoại|địa chỉ|ghi chú/i)) {
+          // Nếu cleanedReply là message ngắn gọn → Kết hợp với formattedOrderSummary
+          reply = cleanedReply + '\n\n' + data.formattedOrderSummary;
+        } else {
+          // Nếu cleanedReply rỗng hoặc chứa tóm tắt đơn hàng → Chỉ dùng formattedOrderSummary
+          reply = data.formattedOrderSummary;
         }
-        // Loại bỏ dòng có chứa các field JSON như "id", "orderCode", "productid", v.v.
-        if (trimmed.match(/^\s*"[^"]+"\s*:\s*"[^"]+"\s*,?\s*$/)) {
-          return false;
-        }
-        return true;
-      });
-      reply = cleanedLines.join('\n').trim();
+        
+        console.log('✅ Final reply after using formattedOrderSummary (BACKEND PRIORITY):', {
+          replyLength: reply.length,
+          replyPreview: reply.substring(0, 200),
+          isUsingFormattedOrderSummary: reply.includes(data.formattedOrderSummary)
+        });
+      } else {
+        // ✅ Nếu không có formattedOrderSummary → Dùng reply từ AI (fallback)
+        // Loại bỏ các dòng sản phẩm bị lặp lại (ví dụ: cùng món xuất hiện cả dạng bullet và text)
+        reply = removeDuplicateProductLines(reply);
+        
+        // ✅ Loại bỏ JSON data khỏi reply text (nếu có) - để tránh hiển thị JSON trong chat
+        // Pattern: tìm và loại bỏ các block JSON như { "id": "...", "orderCode": "...", ... }
+        reply = reply.replace(/\{[\s\S]*?"orderCode"[\s\S]*?\}/g, '').trim();
+        reply = reply.replace(/\{[\s\S]*?"id"[\s\S]*?"orderCode"[\s\S]*?\}/g, '').trim();
+        // Loại bỏ các dòng có chứa JSON structure
+        const lines = reply.split('\n');
+        const cleanedLines = lines.filter(line => {
+          const trimmed = line.trim();
+          // Loại bỏ dòng có chứa JSON structure (có nhiều dấu ngoặc nhọn, dấu phẩy, dấu hai chấm)
+          if (trimmed.startsWith('{') && trimmed.includes('"') && trimmed.includes(':')) {
+            return false;
+          }
+          // Loại bỏ dòng có chứa các field JSON như "id", "orderCode", "productid", v.v.
+          if (trimmed.match(/^\s*"[^"]+"\s*:\s*"[^"]+"\s*,?\s*$/)) {
+            return false;
+          }
+          return true;
+        });
+        reply = cleanedLines.join('\n').trim();
+      }
       
       // Kiểm tra nếu reply rỗng hoặc chỉ có khoảng trắng
       if (!reply || reply.trim() === '') {
